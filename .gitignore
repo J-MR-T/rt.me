@@ -1,0 +1,10 @@
+# binary
+raytracer
+# object files
+build
+# ppm test images
+*.ppm
+# compile db
+compile_commands.json
+# clangd
+.cache
