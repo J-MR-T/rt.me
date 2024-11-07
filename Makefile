@@ -1,13 +1,14 @@
 # standard cpp makefile
+# g++ 14.2.1
 
 CXX=g++
-OUT=render
+OUT=raytracer
 
-CXXFLAGS=-Wall -Wextra -Wpedantic -O3 -std=c++2b -fno-rtti
+CXXFLAGS=-Wall -Wextra -Wpedantic -O3 -std=c++2b -I./include
 DEBUGFLAGS=-fsanitize=address -fsanitize=undefined -fsanitize=leak -O0 -g
 
-SOURCES=$(wildcard src/*.cpp)
-OBJECTS=$(SOURCES:src/%.cpp=build/%.o)
+SOURCES=$(wildcard src/*.cpp) raytracer.cpp
+OBJECTS=$($(filter-out raytracer.cpp,$(SOURCES)):src/%.cpp=build/%.o) build/raytracer.o
 
 .PHONY: all debug clean
 
@@ -22,8 +23,11 @@ debug: setup $(SOURCES)
 setup:
 	mkdir -p build
 
+build/raytracer.o: raytracer.cpp
+	$(CXX) $< $(CXXFLAGS) -c -o $@
 build/%.o: src/%.cpp
 	$(CXX) $< $(CXXFLAGS) -c -o $@
+
 
 # link
 $(OUT): $(OBJECTS)
