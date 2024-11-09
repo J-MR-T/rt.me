@@ -7,24 +7,22 @@ OUT=raytracer
 CXXFLAGS=-Wall -Wextra -Wpedantic -O3 -std=c++2b -I./include
 DEBUGFLAGS=-fsanitize=address -fsanitize=undefined -fsanitize=leak -O0 -g
 
-SOURCES=$(wildcard src/*.cpp) raytracer.cpp
-OBJECTS=$($(filter-out raytracer.cpp,$(SOURCES)):src/%.cpp=build/%.o) build/raytracer.o
+SOURCES=$(wildcard src/*.cpp)
+OBJECTS=$(SOURCES:src/%.cpp=build/%.o)
 
 .PHONY: all debug clean
 
 all: setup $(SOURCES)
-	export CXXFLAGS="$(CXXFLAGS) -DNDEBUG"
-	$(MAKE) $(OUT)
+	# for some reason, export CXXFLAGS+=... doesn't work
+	$(MAKE) $(OUT) CXXFLAGS="$(CXXFLAGS) -DNDEBUG"
 
 debug: setup $(SOURCES)
-	export CXXFLAGS="$(CXXFLAGS) $(DEBUGFLAGS)"
-	$(MAKE) $(OUT)
+	$(MAKE) $(OUT) CXXFLAGS="$(CXXFLAGS) $(DEBUGFLAGS)"
+
 
 setup:
 	mkdir -p build
 
-build/raytracer.o: raytracer.cpp
-	$(CXX) $< $(CXXFLAGS) -c -o $@
 build/%.o: src/%.cpp
 	$(CXX) $< $(CXXFLAGS) -c -o $@
 

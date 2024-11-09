@@ -4,7 +4,7 @@
 //#define JSON_NOEXCEPTION
 //#define JSON_THROW_USER(ignored) do while(0){ std::println(stderr, "Not a valid json file"); std::exit(EXIT_FAILURE); };
 #include "thirdparty/json.h"
-#include "src/util.h"
+#include "util.h"
 
 using json = nlohmann::json;
 
@@ -36,7 +36,7 @@ Scene jsonFileToScene(char* path){
         return j[key];
     };
 
-    auto getOrElse = [](const auto& j, const auto& key, const auto& otherwise) -> json{
+    auto getOrElse = []<typename T>(const auto& j, const auto& key, const T& otherwise) -> T {
         if(!j.contains(key))
             return otherwise;
 
@@ -58,10 +58,6 @@ Scene jsonFileToScene(char* path){
     if(!sceneObjectsJ.is_array())
         fail("shapes is not an array");
     Vec3 backgroundColor    = jsonToVec3(getOrFail(sceneJ, "backgroundcolor"));
-    // TODO
-    //json lightsJ            = getOrFail(sceneJ, "lightsources");
-    // if(!lightsJ.is_array())
-        // fail("lightsources is not an array");
 
     // get render mode
     RenderMode renderMode;
@@ -78,35 +74,51 @@ Scene jsonFileToScene(char* path){
     if(cameraType != "pinhole")
         fail("Invalid camera type");
 
-    PinholePerspectiveCamera camera(
+    // TODO this needs to be a pinhole camera in the future
+    OrthographicCamera camera(
         jsonToVec3(getOrFail(cameraJ, "position")),
         jsonToVec3(getOrFail(cameraJ, "lookAt")),
         jsonToVec3(getOrFail(cameraJ, "upVector")),
-        (float_t) getOrFail(cameraJ, "fov"),
+        //(float_t) getOrFail(cameraJ, "fov"),
         (float_t) getOrFail(cameraJ, "width"),
         (float_t) getOrFail(cameraJ, "height"),
         (float_t) getOrFail(cameraJ, "exposure")
     );
 
-    // TODO get lights
+    std::vector<PointLight> lights;
+
+    // get lights if rendermode is phong
+    if(renderMode == RenderMode::PHONG){
+        json lightsJ = getOrFail(sceneJ, "lightsources");
+        if(!lightsJ.is_array())
+            fail("lightsources is not an array");
+        for(auto& lightJ: lightsJ){
+            std::string type = getOrFail(lightJ, "type");
+            if(type == "pointlight"){
+                Vec3 position = jsonToVec3(getOrFail(lightJ, "position"));
+                Vec3 intensityPerColor = jsonToVec3(getOrFail(lightJ, "intensity"));
+                // there's no color specified, so we'll just always use white for now
+                lights.emplace_back(position, intensityPerColor);
+            }else{
+                // TODO area lights
+                fail("Invalid light type (if you're trying area lights: not supported yet)");
+            }
+        }
+    }
 
     // material
 
-    auto jsonToMaterial = [&](const auto& j){
-        std::optional<float_t> reflectivity = getOrFail(j, "reflectivity");
-        if(!getOrFail(j, "isreflective"))
-            reflectivity = std::nullopt;
+    auto jsonToMaterial = [&](const auto& j) -> std::optional<PhongMaterial>{
+        auto reflectivity = getOrElse(j, "reflectivity", std::optional<float_t>());
 
-        std::optional<float_t> refractivity = getOrFail(j, "refractivity");
-        if(!getOrFail(j, "isrefractive"))
-            refractivity = std::nullopt;
+        auto refractivity = getOrElse(j, "refractivity", std::optional<float_t>());
 
         return PhongMaterial(
-            jsonToVec3(getOrFail(j, "diffuseColor")),
-            jsonToVec3(getOrFail(j, "specularColor")),
+            jsonToVec3(getOrFail(j, "diffusecolor")),
+            jsonToVec3(getOrFail(j, "specularcolor")),
             (float_t) getOrFail(j,  "ks"),
             (float_t) getOrFail(j,  "kd"),
-            (uint64_t) getOrFail(j, "specularExponent"),
+            (uint64_t) getOrFail(j, "specularexponent"),
             reflectivity,
             refractivity
         );
@@ -114,53 +126,46 @@ Scene jsonFileToScene(char* path){
 
     // objects
 
-    std::vector<SceneObject> objects(sceneObjectsJ.size());
+    std::vector<std::variant<Triangle, Sphere, Cylinder>> sceneObjects;
+    sceneObjects.reserve(sceneObjectsJ.size());
 
     for(auto& sceneObjectJ:sceneObjectsJ){
         std::string type = getOrFail(sceneObjectJ, "type");
-        std::optional<Material> material = std::nullopt;
-        if(sceneObjectJ.contains("material"))
-            material = jsonToMaterial(sceneObjectJ["material"]);
+        // get material if it exists, transform the json into a material
+        std::optional<PhongMaterial> material = getOrElse(sceneObjectJ, "material", std::optional<json>()).and_then(jsonToMaterial);
 
         if(type == "triangle"){
-            objects.emplace_back(Triangle(
+            sceneObjects.emplace_back(Triangle(
                 jsonToVec3(getOrFail(sceneObjectJ, "v0")),
                 jsonToVec3(getOrFail(sceneObjectJ, "v1")),
                 jsonToVec3(getOrFail(sceneObjectJ, "v2")),
-                material
+                std::move(material)
             ));
         }else if(type == "sphere"){
-            objects.emplace_back(Sphere(
+            sceneObjects.emplace_back(Sphere(
                 jsonToVec3(getOrFail(sceneObjectJ, "center")),
                 (float_t) getOrFail(sceneObjectJ, "radius"),
-                material
+                std::move(material)
             ));
         }else if(type == "cylinder"){
-            objects.emplace_back(Cylinder(
+            sceneObjects.emplace_back(Cylinder(
                 jsonToVec3(getOrFail(sceneObjectJ, "center")),
                 (float_t) getOrFail(sceneObjectJ, "radius"),
                 (float_t) getOrFail(sceneObjectJ, "height"),
                 jsonToVec3(getOrFail(sceneObjectJ, "axis")),
-                material
+                std::move(material)
             ));
         }else{
             fail("Invalid shape");
         }
     }
-    return Scene(nBounces, renderMode, camera, backgroundColor, objects);
+    return Scene(nBounces, renderMode, std::make_unique<OrthographicCamera>(camera), backgroundColor, sceneObjects);
 }
 
 int main(int argc, char *argv[]) {
     if(argc != 2)
         printHelpExit(argv[0], EXIT_FAILURE);
 
-    //jsonFileToScene(argv[1]);
-
-    PPMWriter ppmWriter("test.ppm", 3, 2);
-    ppmWriter.writePixel(255, 0, 0);
-    ppmWriter.writePixel(0, 255, 0);
-    ppmWriter.writePixel(0, 0, 255);
-    ppmWriter.writePixel(255, 255, 0);
-    ppmWriter.writePixel(255, 0, 255);
-    ppmWriter.writePixel(0, 255, 255);
+    Renderer renderer(jsonFileToScene(argv[1]), "out.ppm");
+    renderer.render<RenderMode::BINARY>();
 }
