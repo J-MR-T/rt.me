@@ -253,6 +253,7 @@ struct PinholePerspectiveCamera : public Camera{
         : Camera(position, direction, up, width, height, exposure),
           fovDegrees(fovDegrees) {
         // TODO something about this is off I think, the image seems a little bit stretched
+        // TODO I think part of it is the assumed 1 unit distance to the image plane
         // Calculate image plane height based on FOV and set image plane dimensions
         const float_t verticalFOVRad = fovDegrees * (M_PI / 180.0); // Convert FOV to radians
         imagePlaneHeight = 2.0f * tan(verticalFOVRad / 2.0f); // Distance to image plane is 1 unit
@@ -627,8 +628,13 @@ struct Renderer{
                 return color;
         }
 
-        auto toneMapped = (color*scene.camera->exposure * 15.).clamp(0.0f, 1.0f);
-        return toneMapped;
+        // only tone-map the final color, not reflections
+        if(bounces == 1){
+            auto toneMapped = (color*scene.camera->exposure * 15.).clamp(0.0f, 1.0f);
+            return toneMapped;
+        } else{
+            return color;
+        }
     }
 
     std::optional<Intersection> traceRayToClosestSceneIntersection(const Ray& ray){
