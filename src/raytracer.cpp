@@ -51,7 +51,7 @@ Scene jsonFileToScene(char* path){
         fail("not an object");
 
     json cameraJ            = getOrFail(root, "camera");
-    uint32_t nBounces       = getOrElse(root, "nBounces", 1);
+    uint32_t nBounces       = getOrElse(root, "nbounces", 1);
     std::string renderModeS = getOrFail(root, "rendermode");
     json sceneJ             = getOrFail(root, "scene");
     json sceneObjectsJ      = getOrFail(sceneJ, "shapes");

@@ -589,7 +589,7 @@ struct Renderer{
             Vec3 L = (light.position - intersectionToShade.point).normalized();
             Vec3 shadowRayOrigin = intersectionToShade.point + L * (100 * epsilon);  // Move the origin slightly to avoid self-intersection
 
-            if(auto shadowIntersection = traceRayToClosestIntersection(Ray(shadowRayOrigin, L))){
+            if(auto shadowIntersection = traceRayToClosestSceneIntersection(Ray(shadowRayOrigin, L))){
                 // if the shadow intersection is closer to the light source than the intersection point, the intersection point is in shadow
                 if((shadowIntersection->point - intersectionToShade.point).length() < (light.position - intersectionToShade.point).length())
                     continue;
@@ -617,19 +617,22 @@ struct Renderer{
             Vec3 reflectionDir = intersectionToShade.incomingRay.direction - intersectionToShade.surfaceNormal * 2 * (intersectionToShade.incomingRay.direction.dot(intersectionToShade.surfaceNormal));
             Ray reflectionRay(intersectionToShade.point + reflectionDir * (10 * epsilon), reflectionDir);
 
-            // TODO background color is added doubly here because of the ambient term i think
             Vec3 reflectedColor = scene.backgroundColor;
-            if (auto reflectionIntersection = traceRayToClosestIntersection(reflectionRay)) {
+            if (auto reflectionIntersection = traceRayToClosestSceneIntersection(reflectionRay)) {
                 reflectedColor = blinnPhongShading(*reflectionIntersection, bounces + 1);
             }
             color = color.lerp(reflectedColor, *intersectionToShade.material.reflectivity);
+
+            // TODO problem: background is getting tone mapped, but we just want to return the background color instead in that case
+            if(color == scene.backgroundColor)
+                return color;
         }
 
         auto toneMapped = (color*scene.camera->exposure * 15.).clamp(0.0f, 1.0f);
         return toneMapped;
     }
 
-    std::optional<Intersection> traceRayToClosestIntersection(const Ray& ray){
+    std::optional<Intersection> traceRayToClosestSceneIntersection(const Ray& ray){
         auto closestIntersection = std::optional<Intersection>();
         for(auto& genericObject: scene.objects){
             std::visit([&](auto&& object){
@@ -650,7 +653,7 @@ struct Renderer{
                 //std::println("Camera ray direction: ({},{},{}) from ({},{},{})", cameraRay.direction.x, cameraRay.direction.y, cameraRay.direction.z, cameraRay.origin.x, cameraRay.origin.y, cameraRay.origin.z);
                 // TODO other objects etc
                 // TODO get closest intersection, not just test one
-                auto closestIntersection = traceRayToClosestIntersection(cameraRay);
+                auto closestIntersection = traceRayToClosestSceneIntersection(cameraRay);
 
                 Vec3 pixelColor = scene.backgroundColor;
                 if(closestIntersection.has_value()){
