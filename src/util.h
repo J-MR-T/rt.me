@@ -578,9 +578,7 @@ struct Renderer{
         float_t ks = intersectionToShade.material.ks;
         float specularExponentShinyness = intersectionToShade.material.specularExponent;
 
-        // only add ambient for the first bounce
-        if(bounces == 1)
-            color += ambient;
+        color += ambient;
 
         // repeat for all lights in the scene
         for(auto& light: scene.lights){
@@ -617,6 +615,7 @@ struct Renderer{
             Vec3 reflectionDir = intersectionToShade.incomingRay.direction - intersectionToShade.surfaceNormal * 2 * (intersectionToShade.incomingRay.direction.dot(intersectionToShade.surfaceNormal));
             Ray reflectionRay(intersectionToShade.point + reflectionDir * (10 * epsilon), reflectionDir);
 
+            // TODO hm, somehow the reflections work, but the light is too intense in the reflections
             Vec3 reflectedColor = scene.backgroundColor;
             if (auto reflectionIntersection = traceRayToClosestSceneIntersection(reflectionRay)) {
                 reflectedColor = blinnPhongShading(*reflectionIntersection, bounces + 1);
