@@ -12,7 +12,11 @@
 // single precision for now
 using float_t = float;
 
-const float_t equalityEpsilon = 1e-6;
+const float_t epsilon = 1e-6;
+
+inline bool implies(bool a, bool b){
+    return !a || b;
+}
 
 struct Vec2{
     float_t x,y;
@@ -42,16 +46,20 @@ struct Vec3{
         return Vec3(x/scalar, y/scalar, z/scalar);
     }
 
-    // elementwise multiplication
+    // elementwise multiplication/division
     Vec3 operator*(Vec3 other) const{
         return Vec3(x*other.x, y*other.y, z*other.z);
     }
 
+    Vec3 operator/(Vec3 other) const{
+        return Vec3(x/other.x, y/other.y, z/other.z);
+    }
+
     bool operator==(const Vec3& other) const{
         // epsilon comparison
-        return std::abs(x - other.x) < equalityEpsilon &&
-            std::abs(y - other.y) < equalityEpsilon &&
-            std::abs(z - other.z) < equalityEpsilon;
+        return std::abs(x - other.x) < epsilon &&
+            std::abs(y - other.y) < epsilon &&
+            std::abs(z - other.z) < epsilon;
     }
 
     Vec3 operator-() {
@@ -63,6 +71,12 @@ struct Vec3{
         x += other.x;
         y += other.y;
         z += other.z;
+        return *this;
+    }
+    Vec3 operator*=(float_t scalar){
+        x *= scalar;
+        y *= scalar;
+        z *= scalar;
         return *this;
     }
 
@@ -84,6 +98,18 @@ struct Vec3{
                  z*other.x - x*other.z,
                  x*other.y - y*other.x
                );
+    }
+
+    Vec3 clamp(float_t min, float_t max){
+        return Vec3(
+            std::clamp(x, min, max),
+            std::clamp(y, min, max),
+            std::clamp(z, min, max)
+        );
+    }
+
+    Vec3 lerp(const Vec3& other, float_t t) const{
+        return *this * (1-t) + other * t;
     }
 };
 
@@ -144,100 +170,118 @@ struct Ray{
 // TODO could use CRTP later, but normal dynamic dispatch is fine for now
 
 struct Camera{
-    virtual ~Camera() = default; 
-
-    virtual Ray generateRay(Vec2 pixelInPixelScreenSpace) = 0;
-};
-
-struct OrthographicCamera : public Camera{
     // TODO think about these
     Vec3 position;
     Vec3 direction;
-    Vec3 up;
+    Vec3 down; // we're using a right-handed coordinate system, as PPM has (0,0) in the top left, so we want to go down not up
     Vec3 right;
     float_t width;
+    uint64_t widthPixels;
     float_t height;
-    float_t exposure;
+    uint64_t heightPixels;
+    float_t exposure; // TODO use
+
+    virtual ~Camera() = default; 
 
     // TODO maybe experiment with && and std::move to avoid some copies
-    OrthographicCamera(
-            Vec3 position,
-            Vec3 direction,
-            Vec3 up,
-            float_t width,
-            float_t height,
-            float_t exposure)
-        : position(position), direction(direction.normalized()), up(up.normalized()), right(direction.cross(up).normalized()), width(width), height(height), exposure(exposure){
+    Camera(Vec3 position,
+           Vec3 lookAt,
+           Vec3 up,
+           float_t width,
+           float_t height,
+           float_t exposure) : position(position), direction((lookAt - position).normalized()), down(-(up.normalized())), right(lookAt.cross(down).normalized()), width(width), widthPixels(std::round(width)), height(height), heightPixels(std::round(height)), exposure(exposure){
         const float_t aspectRatio = width / height;
         imagePlaneDimensions = Vec2(aspectRatio*imagePlaneHeight, imagePlaneHeight);
     }
 
-private:
+    /// gets a pixel in pixel screen space, i.e. [0,width]x[0,height]
+    /// outputs a ray in world space, i.e. adjusting for the camera's position
+    virtual Ray generateRay(Vec2 pixelInScreenSpace) const = 0;
+
+protected:
     float_t imagePlaneHeight = 1.0;
     Vec2 imagePlaneDimensions;
 
-public:
-
     /// gets a pixel in pixel screen space, i.e. [0,width]x[0,height]
-    /// outputs a ray in world space, i.e. adjusting for the camera's position
-    virtual Ray generateRay(Vec2 pixelInPixelScreenSpace) override{
+    Vec3 pixelInWorldSpace(Vec2 pixelInScreenSpace) const {
         // so, the pixel is in the range [0,width]x[0,height]
         // we want to map this to [-0.5,0.5]x[-0.5,0.5] in the camera's space
         // which is then mapped to the image plane in world space
 
-        const float_t pixelWidthHeight = 1.0;
+        constexpr float_t pixelWidthHeight = 1.0;
 
         Vec2 pixelCenterInCameraSpace = Vec2(
-            (pixelInPixelScreenSpace.x + /* use center of pixel */ pixelWidthHeight/2) / width - 0.5,
-            (pixelInPixelScreenSpace.y + pixelWidthHeight/2) / height - 0.5
+            (pixelInScreenSpace.x + /* use center of pixel */ pixelWidthHeight/2) / width - 0.5,
+            (pixelInScreenSpace.y + pixelWidthHeight/2) / height - 0.5
         );
 
 
         // scale to world space scale (not translation yet) by multiplying by the image plane dimensions
         Vec2 pixelScaledByWorldSpace = Vec2(pixelCenterInCameraSpace.x * imagePlaneDimensions.x, pixelCenterInCameraSpace.y * imagePlaneDimensions.y);
 
-        // now after scaling to world space, translate to wrold space, and add the camera's right/up directions
-        Vec3 rayOrigin = position + right*pixelScaledByWorldSpace.x + up*pixelScaledByWorldSpace.y;
+        // now after scaling to world space, translate to world space, and add the camera's right/up directions
+        Vec3 pixelOrigin = position + right*pixelScaledByWorldSpace.x + down*pixelScaledByWorldSpace.y;
+        return pixelOrigin;
+    }
+};
 
-        // for an orthographic camera, basically just shoot a ray in the look direction
+struct OrthographicCamera : public Camera{
+
+    OrthographicCamera(Vec3 position, Vec3 direction, Vec3 up, float_t width, float_t height, float_t exposure)
+        : Camera(position, direction, up, width, height, exposure){ }
+
+    virtual Ray generateRay(Vec2 pixelInScreenSpace) const override{
+        // for an orthographic camera, basically just shoot a ray in the look direction, through the pixel center
         return Ray(
-            rayOrigin,
+            pixelInWorldSpace(pixelInScreenSpace),
             direction
         );
     }
 };
 
 struct PinholePerspectiveCamera : public Camera{
-    Vec3 position;
-    // TODO direction vs look at ?
-    Vec3 direction;
-    Vec3 up;
-    float_t fov;
-    float_t width;
-    float_t height;
-    float_t exposure;
+    float_t fovDegrees;
 
     PinholePerspectiveCamera(
-            Vec3 position,
-            Vec3 lookAt,
-            Vec3 up,
-            float_t fov,
-            float_t width,
-            float_t height,
-            float_t exposure)
-        : position(position), direction(lookAt), up(up), fov(fov), width(width), height(height), exposure(exposure){ }
+        Vec3 position,
+        Vec3 direction,
+        Vec3 up,
+        float_t fovDegrees,
+        float_t width,
+        float_t height,
+        float_t exposure)
+        : Camera(position, direction, up, width, height, exposure),
+          fovDegrees(fovDegrees) {
+        // TODO something about this is off I think, the image seems a little bit stretched
+        // Calculate image plane height based on FOV and set image plane dimensions
+        const float_t verticalFOVRad = fovDegrees * (M_PI / 180.0); // Convert FOV to radians
+        imagePlaneHeight = 2.0f * tan(verticalFOVRad / 2.0f); // Distance to image plane is 1 unit
+        const float_t aspectRatio = width / height;
+        imagePlaneDimensions = Vec2(imagePlaneHeight * aspectRatio, imagePlaneHeight);
+    }
+
+    /// gets a pixel in pixel screen space, i.e. [0,width]x[0,height]
+    /// outputs a ray in world space, i.e. adjusting for the camera's position
+    /// Generates a ray from the camera position through the specified pixel
+    virtual Ray generateRay(Vec2 pixelInScreenSpace) const override {
+        // Use pixelInWorldSpace to get the point on the image plane in world space
+        Vec3 pointOnImagePlane = pixelInWorldSpace(pixelInScreenSpace) + /* place image plane 1 unit away from camera */ direction;
+
+        // Calculate ray direction from camera position to point on image plane
+        Vec3 rayDirection = (pointOnImagePlane - position).normalized();
+
+        return Ray(position, rayDirection);
+    }
 };
 
 
 struct PhongMaterial {
-    // technically this is not mandated in the json format, but it is part of the phong model, so we'll keep it here
-    Vec3 ambientColor = Vec3(0,0,0);
     Vec3 diffuseColor;
     Vec3 specularColor;
     float_t ks,kd;
     uint64_t specularExponent;
     std::optional<float_t> reflectivity;
-    std::optional<float_t> refractivity;
+    std::optional<float_t> refractiveIndex;
 
     PhongMaterial(
             Vec3 diffuseColor,
@@ -246,8 +290,8 @@ struct PhongMaterial {
             float_t kd,
             uint64_t specularExponent,
             std::optional<float_t> reflectivity,
-            std::optional<float_t> refractivity)
-        : diffuseColor(diffuseColor), specularColor(specularColor), ks(ks), kd(kd), specularExponent(specularExponent), reflectivity(reflectivity), refractivity(refractivity){ }
+            std::optional<float_t> refractiveIndex)
+        : diffuseColor(diffuseColor), specularColor(specularColor), ks(ks), kd(kd), specularExponent(specularExponent), reflectivity(reflectivity), refractiveIndex(refractiveIndex){ }
 };
 
 //struct Material{
@@ -266,7 +310,9 @@ struct Intersection{
     PhongMaterial material;
 
     Intersection(Ray incomingray, Vec3 point, Vec3 surfaceNormal, PhongMaterial material)
-        : incomingRay(incomingray), point(point), surfaceNormal(surfaceNormal), material(material){ }
+        : incomingRay(incomingray), point(point), surfaceNormal(surfaceNormal), material(material){
+        assert(surfaceNormal == surfaceNormal.normalized() && "Surface normal must be normalized");
+    }
 
     float_t distance() const{
         return (point - incomingRay.origin).length();
@@ -290,7 +336,7 @@ struct Sphere {
         : center(center), radius(radius), material(givenMaterialOrDefault(std::move(material))){ }
 
     std::optional<Intersection> intersect(const Ray& ray) {
-        // chatgpt generated code
+        // mostly generated by chatgpt
 
         // Vector from the ray's origin to the sphere's center
         Vec3 oc = ray.origin - center;
@@ -333,16 +379,77 @@ struct Sphere {
 struct Cylinder {
     Vec3 center;
     float_t radius;
-    float_t height;
+    float_t eachSideHeight;
     Vec3 axis;
     PhongMaterial material;
 
     Cylinder(Vec3 center, float_t radius, float_t height, Vec3 axis, std::optional<PhongMaterial> material)
-        : center(center), radius(radius), height(height), axis(axis), material(givenMaterialOrDefault(std::move(material))){ }
+        : center(center), radius(radius), eachSideHeight(height), axis(axis), material(givenMaterialOrDefault(std::move(material))){ }
 
     std::optional<Intersection> intersect(const Ray& ray) {
-        // TODO
-        return std::nullopt;
+        // mostly generated by chatgpt
+
+        Vec3 d = ray.direction - axis * ray.direction.dot(axis);  // Projected ray direction onto the cylinder's plane
+        Vec3 oc = ray.origin - center;
+        Vec3 oc_proj = oc - axis * oc.dot(axis);                  // Projected ray origin onto the cylinder's plane
+
+        float a = d.dot(d);
+        float b = 2.0f * d.dot(oc_proj);
+        float c = oc_proj.dot(oc_proj) - radius * radius;
+        std::optional<Intersection> closestIntersection = std::nullopt;
+
+        // Quadratic discriminant for side wall intersection
+        float discriminant = b * b - 4 * a * c;
+        if (discriminant >= 0) {
+            float sqrtDiscriminant = std::sqrt(discriminant);
+            for (float t : { (-b - sqrtDiscriminant) / (2.0 * a), (-b + sqrtDiscriminant) / (2.0 * a) }) {
+                if (t < 0) continue;
+
+                Vec3 point = ray.origin + ray.direction * t;
+                Vec3 localPoint = point - center;
+                float projectionOnAxis = localPoint.dot(axis);
+
+                // Check if intersection point is within height limits of the cylinder
+                if (projectionOnAxis >= -eachSideHeight && projectionOnAxis <= eachSideHeight) {
+                    Vec3 normal = (localPoint - axis * projectionOnAxis).normalized();
+                    Intersection intersection(ray, point, normal, material);
+
+                    // Update closest intersection
+                    if (!closestIntersection || t < (closestIntersection->point - ray.origin).length()) {
+                        closestIntersection = intersection;
+                    }
+                }
+            }
+        }
+
+        // Lambda to handle cap intersection
+        auto checkCapIntersection = [&](const Vec3& capCenter, const Vec3& capNormal) -> std::optional<Intersection> {
+            float denom = ray.direction.dot(capNormal);
+            if (std::abs(denom) < 1e-6) return std::nullopt;
+
+            float tCap = (capCenter - ray.origin).dot(capNormal) / denom;
+            if (tCap < 0) return std::nullopt;
+
+            Vec3 point = ray.origin + ray.direction * tCap;
+            if ((point - capCenter).length() <= radius) {  // Check if within radius of cap
+                Intersection intersection(ray, point, capNormal, material);
+                return intersection;
+            }
+            return std::nullopt;
+        };
+
+        // Check intersections with the base and top caps
+        for (auto& cap : { std::make_pair(center - axis * eachSideHeight, -axis), 
+                std::make_pair(center + axis * eachSideHeight, axis) }) {
+            if (auto capIntersection = checkCapIntersection(cap.first, cap.second); capIntersection) {
+                float capDistance = (capIntersection->point - ray.origin).length();
+                if (!closestIntersection || capDistance < (closestIntersection->point - ray.origin).length()) {
+                    closestIntersection = capIntersection;
+                }
+            }
+        }
+
+        return closestIntersection;
     }
 };
 
@@ -358,10 +465,43 @@ struct Triangle {
         return (v1-v0).cross(v2-v0);
     }
 
-    // TODO normal vector interpolation at any point for smooth shading
+    // TODO normal vector interpolation at any point for smooth shading (requires knowledge of the rest of the mesh)
 
     std::optional<Intersection> intersect(const Ray& ray) {
-        // TODO
+        // Möller–Trumbore intersection
+        // mostly generated by chatgpt
+        Vec3 edge1 = v1 - v0;
+        Vec3 edge2 = v2 - v0;
+        Vec3 h = ray.direction.cross(edge2);
+        float a = edge1.dot(h);
+
+        // If a is near zero, the ray is parallel to the triangle
+        if (std::abs(a) < epsilon) return std::nullopt;
+
+        float f = 1.0 / a;
+        Vec3 s = ray.origin - v0;
+        float u = f * s.dot(h);
+
+        // Check if the intersection is outside the triangle
+        if (u < 0.0 || u > 1.0) return std::nullopt;
+
+        Vec3 q = s.cross(edge1);
+        float v = f * ray.direction.dot(q);
+
+        // Check if the intersection is outside the triangle
+        if (v < 0.0 || u + v > 1.0) return std::nullopt;
+
+        // Calculate the distance along the ray to the intersection point
+        float t = f * edge2.dot(q);
+
+        // Only accept intersections that are in front of the ray origin
+        if (t > epsilon) {
+            Vec3 intersectionPoint = ray.origin + ray.direction * t;
+            Vec3 normal = faceNormal().normalized();  // Use the constant normal for the triangle
+
+            return Intersection(ray, intersectionPoint, normal, material);
+        }
+
         return std::nullopt;
     }
 };
@@ -397,62 +537,96 @@ struct Scene{
 
     //Scene(uint32_t nBounces, RenderMode renderMode, std::unique_ptr<Camera> camera, Vec3 backgroundColor, std::vector<Triangle> triangles, std::vector<Sphere> spheres, std::vector<Cylinder> cylinders)
     //    : nBounces(nBounces), renderMode(renderMode), camera(std::move(camera)), backgroundColor(backgroundColor), triangles(triangles), spheres(spheres), cylinders(cylinders){ }
-    Scene(uint32_t nBounces, RenderMode renderMode, std::unique_ptr<Camera> camera, Vec3 backgroundColor, std::vector<std::variant<Triangle, Sphere, Cylinder>> objects)
-        : nBounces(nBounces), renderMode(renderMode), camera(std::move(camera)), backgroundColor(backgroundColor), objects(objects){ }
+    Scene(uint32_t nBounces, RenderMode renderMode, std::unique_ptr<Camera> camera, Vec3 backgroundColor, std::vector<PointLight> lights, std::vector<std::variant<Triangle, Sphere, Cylinder>> objects)
+        : nBounces(nBounces), renderMode(renderMode), camera(std::move(camera)), backgroundColor(backgroundColor), lights(lights), objects(objects){ }
 };
 
 struct Renderer{
 
     Scene scene;
     PPMWriter writer;
+    // ordered the same way a PPM file is, row by row
+    // use a buffer instead of writing to the file immediately to be able to do it in parallel
+    std::vector<Vec3> pixelBuffer;
 
     Renderer(Scene&& scene, std::string_view outputFilePath)
         // TODO adjust writer
-        : scene(std::move(scene)), writer(outputFilePath, 1200, 800){ }
+        : scene(std::move(scene)), writer(outputFilePath, this->scene.camera->width, this->scene.camera->height), pixelBuffer(this->scene.camera->widthPixels*this->scene.camera->heightPixels, Vec3(0.)){}
+
+    void bufferSpecificPixel(Vec2 pixel, Vec3 color){
+        assert(pixel.x >= 0 && pixel.x < scene.camera->width && pixel.y >= 0 && pixel.y < scene.camera->height && "Pixel out of range");
+        assert(color == color.clamp(0.0f, 1.0f) && "Color must be clamped to [0,1]");
+        assert(scene.camera->width * pixel.y + pixel.x < pixelBuffer.size() && "Pixel out of range");
+        pixelBuffer[pixel.y * scene.camera->width + pixel.x] = color;
+    }
 
     /// shades a single intersection point
-    Vec3 blinnPhongShading(const Intersection& intersection, uint32_t bounces = 1){
-        // mostly chatgpt generated
-
+    /// outputs an un-tonemapped color, not for immediate display
+    Vec3 blinnPhongShading(const Intersection& intersectionToShade, uint32_t bounces = 1){
         if (bounces > scene.nBounces)
             return Vec3(0.0f);
 
         Vec3 color(0.0f);
 
-        Vec3 ambient = intersection.material.ambientColor;
-        Vec3 diffuse = intersection.material.diffuseColor;
-        Vec3 specular = intersection.material.specularColor;
-        float specularExponentShinyness = intersection.material.specularExponent;
+        Vec3 diffuse = intersectionToShade.material.diffuseColor;
+        // to match the given example renders, it seems they used ambient light in the same color as the diffuse light of each object
+        float_t ambientIntensity = 0.25f;
+        Vec3 ambient = diffuse * ambientIntensity;
+        
+        float_t kd = intersectionToShade.material.kd;
+        Vec3 specular = intersectionToShade.material.specularColor;
+        float_t ks = intersectionToShade.material.ks;
+        float specularExponentShinyness = intersectionToShade.material.specularExponent;
+
+        // only add ambient for the first bounce
+        if(bounces == 1)
+            color += ambient;
 
         // repeat for all lights in the scene
         for(auto& light: scene.lights){
-            Vec3 ambientTerm = ambient * light.intensityPerColor;
-            Vec3 L = (light.position - intersection.point).normalized();
-            Vec3 N = intersection.surfaceNormal;
+            // check for point light shadow: cast a ray from the intersection point to the light source
+
+            Vec3 L = (light.position - intersectionToShade.point).normalized();
+            Vec3 shadowRayOrigin = intersectionToShade.point + L * (100 * epsilon);  // Move the origin slightly to avoid self-intersection
+
+            if(auto shadowIntersection = traceRayToClosestIntersection(Ray(shadowRayOrigin, L))){
+                // if the shadow intersection is closer to the light source than the intersection point, the intersection point is in shadow
+                if((shadowIntersection->point - intersectionToShade.point).length() < (light.position - intersectionToShade.point).length())
+                    continue;
+            }
+
+            Vec3 N = intersectionToShade.surfaceNormal;
 
             float diff = std::max(N.dot(L), 0.0f);
-            Vec3 diffuseTerm = diffuse * diff * light.intensityPerColor;
+            Vec3 diffuseTerm = diffuse * diff * light.intensityPerColor * kd;
 
-            Vec3 V = -intersection.incomingRay.direction.normalized();  // Use the ray direction from the intersection
+            Vec3 V = -intersectionToShade.incomingRay.direction.normalized();  // Use the ray direction from the intersection
             Vec3 H = (L + V).normalized();
             float spec = std::pow(std::max(N.dot(H), 0.0f), specularExponentShinyness);
-            Vec3 specularTerm = specular * spec * light.intensityPerColor;
+            Vec3 specularTerm = specular * spec * light.intensityPerColor * ks;
 
-            color += ambientTerm + diffuseTerm + specularTerm;
+            color += diffuseTerm + specularTerm;
 
-            Vec3 reflectionDir = intersection.incomingRay.direction - N * 2 * (intersection.incomingRay.direction.dot(N));
-            Ray reflectionRay(intersection.point + reflectionDir * 0.001f, reflectionDir);
-
-            if (auto reflectionIntersection = traceRayToClosestIntersection(reflectionRay)) {
-                // only reflect if material is reflective
-                if(!intersection.material.reflectivity.has_value())
-                    continue;
-
-                color += blinnPhongShading(*reflectionIntersection, bounces + 1) * *intersection.material.reflectivity;
-            }
         }
 
-        return color;
+        // TODO reflections, not great yet
+        // only reflect if material is reflective
+        if(intersectionToShade.material.reflectivity.has_value()){
+            // perfect reflection
+            // TODO modify direction based on reflectivity?
+            Vec3 reflectionDir = intersectionToShade.incomingRay.direction - intersectionToShade.surfaceNormal * 2 * (intersectionToShade.incomingRay.direction.dot(intersectionToShade.surfaceNormal));
+            Ray reflectionRay(intersectionToShade.point + reflectionDir * (10 * epsilon), reflectionDir);
+
+            // TODO background color is added doubly here because of the ambient term i think
+            Vec3 reflectedColor = scene.backgroundColor;
+            if (auto reflectionIntersection = traceRayToClosestIntersection(reflectionRay)) {
+                reflectedColor = blinnPhongShading(*reflectionIntersection, bounces + 1);
+            }
+            color = color.lerp(reflectedColor, *intersectionToShade.material.reflectivity);
+        }
+
+        auto toneMapped = (color*scene.camera->exposure * 15.).clamp(0.0f, 1.0f);
+        return toneMapped;
     }
 
     std::optional<Intersection> traceRayToClosestIntersection(const Ray& ray){
@@ -469,27 +643,34 @@ struct Renderer{
 
     template<RenderMode mode>
     void render(){
-        for(uint32_t y = 0; y < 800; y++){
-            for(uint32_t x = 0; x < 1200; x++){
+#pragma omp parallel for
+        for(uint32_t y = 0; y < scene.camera->heightPixels; y++){
+            for(uint32_t x = 0; x < scene.camera->widthPixels; x++){
                 Ray cameraRay = scene.camera->generateRay(Vec2(x, y));
                 //std::println("Camera ray direction: ({},{},{}) from ({},{},{})", cameraRay.direction.x, cameraRay.direction.y, cameraRay.direction.z, cameraRay.origin.x, cameraRay.origin.y, cameraRay.origin.z);
                 // TODO other objects etc
                 // TODO get closest intersection, not just test one
                 auto closestIntersection = traceRayToClosestIntersection(cameraRay);
 
+                Vec3 pixelColor = scene.backgroundColor;
                 if(closestIntersection.has_value()){
                     if constexpr (mode == RenderMode::BINARY){
-                        writer.writePixel(255, 255, 255);
+                        pixelColor = Vec3(1.0);
                     }else if constexpr (mode == RenderMode::PHONG){
-                        writer.writePixel(blinnPhongShading(*closestIntersection));
+                        pixelColor = blinnPhongShading(*closestIntersection);
                     }else{
                         static_assert(false, "Invalid render mode");
                     }
-                }else{
-                    writer.writePixel(scene.backgroundColor);
                 }
+
+                bufferSpecificPixel(Vec2(x, y), pixelColor);
             }
         }
+
+        // write buffer to file
+        assert(pixelBuffer.size() == scene.camera->widthPixels * scene.camera->heightPixels && "Pixel buffer size mismatch");
+        for(auto& pixel: pixelBuffer)
+            writer.writePixel(pixel);
     }
 
 

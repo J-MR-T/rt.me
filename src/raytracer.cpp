@@ -24,7 +24,7 @@ Scene jsonFileToScene(char* path){
     jsonIfstream >> root;
 
     // on failure, just exit
-    auto fail = [](auto message){
+    auto fail = [] [[noreturn]] (auto message)  {
         std::println(stderr, "Invalid Json: {}", message);
         std::exit(EXIT_FAILURE);
     };
@@ -75,14 +75,14 @@ Scene jsonFileToScene(char* path){
         fail("Invalid camera type");
 
     // TODO this needs to be a pinhole camera in the future
-    OrthographicCamera camera(
+    PinholePerspectiveCamera camera(
         jsonToVec3(getOrFail(cameraJ, "position")),
         jsonToVec3(getOrFail(cameraJ, "lookAt")),
         jsonToVec3(getOrFail(cameraJ, "upVector")),
-        //(float_t) getOrFail(cameraJ, "fov"),
-        (float_t) getOrFail(cameraJ, "width"),
-        (float_t) getOrFail(cameraJ, "height"),
-        (float_t) getOrFail(cameraJ, "exposure")
+        (float_t) getOrFail(cameraJ,  "fov"),
+        (float_t) getOrFail(cameraJ,  "width"),
+        (float_t) getOrFail(cameraJ,  "height"),
+        (float_t) getOrFail(cameraJ,  "exposure")
     );
 
     std::vector<PointLight> lights;
@@ -109,9 +109,13 @@ Scene jsonFileToScene(char* path){
     // material
 
     auto jsonToMaterial = [&](const auto& j) -> std::optional<PhongMaterial>{
-        auto reflectivity = getOrElse(j, "reflectivity", std::optional<float_t>());
+        std::optional<float_t> reflectivity = getOrFail(j, "reflectivity");
+        if(!getOrFail(j, "isreflective"))
+            reflectivity = std::nullopt;
 
-        auto refractivity = getOrElse(j, "refractivity", std::optional<float_t>());
+        std::optional<float_t> refractiveIndex = getOrFail(j, "refractiveindex");
+        if(!getOrFail(j, "isrefractive"))
+            refractiveIndex = std::nullopt;
 
         return PhongMaterial(
             jsonToVec3(getOrFail(j, "diffusecolor")),
@@ -120,12 +124,11 @@ Scene jsonFileToScene(char* path){
             (float_t) getOrFail(j,  "kd"),
             (uint64_t) getOrFail(j, "specularexponent"),
             reflectivity,
-            refractivity
+            refractiveIndex
         );
     };
 
     // objects
-
     std::vector<std::variant<Triangle, Sphere, Cylinder>> sceneObjects;
     sceneObjects.reserve(sceneObjectsJ.size());
 
@@ -159,7 +162,7 @@ Scene jsonFileToScene(char* path){
             fail("Invalid shape");
         }
     }
-    return Scene(nBounces, renderMode, std::make_unique<OrthographicCamera>(camera), backgroundColor, sceneObjects);
+    return Scene(nBounces, renderMode, std::make_unique<PinholePerspectiveCamera>(camera), backgroundColor, lights, sceneObjects);
 }
 
 int main(int argc, char *argv[]) {
@@ -167,5 +170,13 @@ int main(int argc, char *argv[]) {
         printHelpExit(argv[0], EXIT_FAILURE);
 
     Renderer renderer(jsonFileToScene(argv[1]), "out.ppm");
-    renderer.render<RenderMode::BINARY>();
+    // "convert" render mode to constexpr
+    if(renderer.scene.renderMode == RenderMode::BINARY)
+        renderer.render<RenderMode::BINARY>();
+    else if(renderer.scene.renderMode == RenderMode::PHONG)
+        renderer.render<RenderMode::PHONG>();
+    else
+        std::exit(EXIT_FAILURE);
+
+    return EXIT_SUCCESS;
 }

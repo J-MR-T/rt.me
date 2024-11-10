@@ -4,10 +4,11 @@
 CXX=g++
 OUT=raytracer
 
-CXXFLAGS=-Wall -Wextra -Wpedantic -O3 -std=c++2b -I./include
+CXXFLAGS=-Wall -Wextra -Wpedantic -O3 -std=c++2b -I./include -fopenmp
 DEBUGFLAGS=-fsanitize=address -fsanitize=undefined -fsanitize=leak -O0 -g
 
 SOURCES=$(wildcard src/*.cpp)
+DEPS=$(wildcard src/*.h)
 OBJECTS=$(SOURCES:src/%.cpp=build/%.o)
 
 .PHONY: all debug clean
@@ -23,7 +24,7 @@ debug: setup $(SOURCES)
 setup:
 	mkdir -p build
 
-build/%.o: src/%.cpp
+build/%.o: src/%.cpp $(DEPS)
 	$(CXX) $< $(CXXFLAGS) -c -o $@
 
 
