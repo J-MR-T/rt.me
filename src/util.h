@@ -608,7 +608,7 @@ struct Renderer{
 
         }
 
-        // TODO reflections, not great yet
+        // reflections
         // only reflect if material is reflective
         if(intersectionToShade.material.reflectivity.has_value()){
             // perfect reflection
@@ -616,26 +616,23 @@ struct Renderer{
             Vec3 reflectionDir = intersectionToShade.incomingRay.direction - intersectionToShade.surfaceNormal * 2 * (intersectionToShade.incomingRay.direction.dot(intersectionToShade.surfaceNormal));
             Ray reflectionRay(intersectionToShade.point + reflectionDir * (10 * epsilon), reflectionDir);
 
-            // TODO hm, somehow the reflections work, but the light is too intense in the reflections
             Vec3 reflectedColor = scene.backgroundColor;
             if (auto reflectionIntersection = traceRayToClosestSceneIntersection(reflectionRay)) {
                 reflectedColor = blinnPhongShading(*reflectionIntersection, bounces + 1);
             }
             color = color.lerp(reflectedColor, *intersectionToShade.material.reflectivity);
-
-            // TODO problem: background is getting tone mapped, but we just want to return the background color instead in that case
-            if(color == scene.backgroundColor)
-                return color;
         }
 
-        // only tone-map the final color, not reflections
-        if(bounces == 1){
-            auto toneMapped = (color*scene.camera->exposure * 15.).clamp(0.0f, 1.0f);
-            return toneMapped;
-        } else{
-            return color;
-        }
+        return color;
     }
+
+    Vec3 shadeIntersection(const Intersection& intersectionToShade){
+        // "0th" bounce: decide on the shading model, and do tone mapping
+        auto shadedHDRColor = blinnPhongShading(intersectionToShade);
+        auto toneMapped = (shadedHDRColor*scene.camera->exposure * 15.).clamp(0.0f, 1.0f);
+        return toneMapped;
+    }
+
 
     std::optional<Intersection> traceRayToClosestSceneIntersection(const Ray& ray){
         auto closestIntersection = std::optional<Intersection>();
@@ -668,7 +665,7 @@ struct Renderer{
                     if constexpr (mode == RenderMode::BINARY){
                         pixelColor = Vec3(1.0);
                     }else if constexpr (mode == RenderMode::PHONG){
-                        pixelColor = blinnPhongShading(*closestIntersection);
+                        pixelColor = shadeIntersection(*closestIntersection);
                     }else{
                         static_assert(false, "Invalid render mode");
                     }
