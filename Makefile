@@ -4,7 +4,7 @@
 CXX=g++
 OUT=raytracer
 
-CXXFLAGS=-Wall -Wextra -Wpedantic -O3 -std=c++2b -I./include -fopenmp
+CXXFLAGS=-Wall -Wextra -Wpedantic -O3 -std=c++2b -I./include -fopenmp -fopenacc
 DEBUGFLAGS=-fsanitize=address -fsanitize=undefined -fsanitize=leak -O0 -g
 
 SOURCES=$(wildcard src/*.cpp)

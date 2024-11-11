@@ -651,6 +651,9 @@ struct Renderer{
 
     template<RenderMode mode>
     void render(){
+// cant try gpu openacc because nvcc doesnt support c++23 :(
+// openacc with gcc is about 5x slower than openmp
+//#pragma acc parallel loop
 #pragma omp parallel for
         for(uint32_t y = 0; y < scene.camera->heightPixels; y++){
             for(uint32_t x = 0; x < scene.camera->widthPixels; x++){
