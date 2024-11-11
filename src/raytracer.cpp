@@ -169,6 +169,18 @@ int main(int argc, char *argv[]) {
     if(argc != 2)
         printHelpExit(argv[0], EXIT_FAILURE);
 
+    // measure time
+
+    // my own time measurement macros/primitives (see jmrt.sh/monaco)
+    // steady_clock == MONOTONIC, best for performance measurements
+#define MEASURE_TIME_START(point) auto point ## _start = std::chrono::steady_clock::now()
+
+#define MEASURE_TIME_END(point) auto point ## _end = std::chrono::steady_clock::now()
+
+#define MEASURED_TIME_AS_SECONDS(point, iterations) std::chrono::duration_cast<std::chrono::duration<double>>(point ## _end - point ## _start).count()/(static_cast<double>(iterations))
+
+    MEASURE_TIME_START(wallTime);
+
     Renderer renderer(jsonFileToScene(argv[1]), "out.ppm");
     // "convert" render mode to constexpr
     if(renderer.scene.renderMode == RenderMode::BINARY)
@@ -177,6 +189,10 @@ int main(int argc, char *argv[]) {
         renderer.render<RenderMode::PHONG>();
     else
         std::exit(EXIT_FAILURE);
+
+    MEASURE_TIME_END(wallTime);
+
+    std::println("Rendered in {} seconds", MEASURED_TIME_AS_SECONDS(wallTime, 1));
 
     return EXIT_SUCCESS;
 }
