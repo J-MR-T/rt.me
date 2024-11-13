@@ -690,107 +690,121 @@ struct Renderer{
 
     /// shades a single intersection point
     /// outputs an un-tonemapped color, not for immediate display
-    Vec3 blinnPhongShading(const Intersection& intersectionToShade, uint32_t bounces = 1, float_t currentIOR = 1.0f){
+    Vec3 blinnPhongShading(const Intersection& intersectionToShade, uint32_t bounces = 1, float currentIOR = 1.0f) {
         if (bounces > scene.nBounces)
             return Vec3(0.0f);
 
-        Vec3 color(0.0f);
+        // material properties
+        Vec3 diffuse = intersectionToShade.material.diffuseColorAtTextureCoords(intersectionToShade.textureCoords);
+        float_t ambientIntensity = 0.25f;
+        Vec3 ambient = diffuse * ambientIntensity;
+        Vec3 specular = intersectionToShade.material.specularColor;
+        float_t ks = intersectionToShade.material.ks;
+        float specularExponentShinyness = intersectionToShade.material.specularExponent;
 
+        auto isInShadow = [&](const Vec3& L) -> bool {
+            Vec3 shadowRayOrigin = intersectionToShade.point + L * (100 * epsilon);
+            Ray shadowRay(shadowRayOrigin, L);
 
-        // TODO refractions: not entirely right at the moment?
-        // If the material is refractive (transparent), we only want the refracted color
+            if (auto shadowIntersection = traceRayToClosestSceneIntersection(shadowRay)) {
+                return (shadowIntersection->point - intersectionToShade.point).length() < (scene.lights[0].position - intersectionToShade.point).length();
+            }
+            return false;
+        };
+
+        // Helper function to calculate specular highlights
+        auto calculateSpecularHighlights = [&]() -> Vec3 {
+            Vec3 specularSum(0.0f);
+
+            for(auto& light: scene.lights) {
+                Vec3 L = (light.position - intersectionToShade.point).normalized();
+                if(isInShadow(L))
+                    continue;
+
+                Vec3 V = -intersectionToShade.incomingRay.direction.normalized();
+                Vec3 H = (L + V).normalized();
+                float spec = std::pow(std::max(intersectionToShade.surfaceNormal.dot(H), 0.0f), 
+                        specularExponentShinyness);
+                specularSum += specular * spec * light.intensityPerColor * ks;
+            }
+            return specularSum;
+        };
+
+        // Handle transparent (refractive) materials differently
         if (intersectionToShade.material.refractiveIndex.has_value()) {
-            Vec3 refractedColor = scene.backgroundColor;
+            // make sure to still have specular highlights on transparent objects
+            // these would be weighted by the objects transmissiveness, but as that doesnt exist, just add them for now
+            Vec3 finalColor = calculateSpecularHighlights();
             float materialIOR = *intersectionToShade.material.refractiveIndex;
 
-            // Determine if we're entering or exiting the material
             bool entering = intersectionToShade.incomingRay.direction.dot(intersectionToShade.surfaceNormal) < 0;
             Vec3 normal = entering ? intersectionToShade.surfaceNormal : -intersectionToShade.surfaceNormal;
-
-            // Calculate IOR ratio based on whether we're entering or exiting
             float etaRatio = entering ? currentIOR / materialIOR : materialIOR / currentIOR;
 
             float cosTheta_i = -normal.dot(intersectionToShade.incomingRay.direction);
             float sinTheta_t_squared = etaRatio * etaRatio * (1.0f - cosTheta_i * cosTheta_i);
 
-            // Check for total internal reflection
             if (sinTheta_t_squared <= 1.0f) {
                 float cosTheta_t = std::sqrt(1.0f - sinTheta_t_squared);
-                Vec3 refractedDir = etaRatio * intersectionToShade.incomingRay.direction +
+                Vec3 refractedDir = etaRatio * intersectionToShade.incomingRay.direction + 
                     (etaRatio * cosTheta_i - cosTheta_t) * normal;
 
                 Ray refractedRay(intersectionToShade.point + refractedDir * (10 * epsilon), refractedDir);
-
-                // Pass the new IOR to the recursive call
                 float nextIOR = entering ? materialIOR : 1.0f;
+
+                Vec3 refractedColor = scene.backgroundColor;
                 if (auto refractedIntersection = traceRayToClosestSceneIntersection(refractedRay)) {
                     refractedColor = blinnPhongShading(*refractedIntersection, bounces + 1, nextIOR);
                 }
 
-                return refractedColor;  // For transparent materials, we only return the refracted color
+                // tint the refraction by the diffuse color, to be able to make e.g. red glass
+                // TODO could add something like a density parameter to the material, to decide how much to tint, but for now, thats just encoded in the diffuse color
+                finalColor += refractedColor * diffuse;
+                return finalColor;
+            }else{
+                // Total internal reflection
+                // handle by simply going on with the normal lighting nor now
+                // TODO to look somewhat realistic, this curently requires the material to be reflective
+                //      but thats somewhat consistent with the phong lighting model idea: you're responsible for
+                //      a realistic looking material, not the renderer
             }
-            // In case of total internal reflection, fall through to regular shading
+
         }
 
-        Vec3 diffuse = intersectionToShade.material.diffuseColorAtTextureCoords(intersectionToShade.textureCoords);
-        // to match the given example renders, it seems they used ambient light in the same color as the diffuse light of each object
-        float_t ambientIntensity = 0.25f;
-        Vec3 ambient = diffuse * ambientIntensity;
-        
+        // Regular materials: ambient + diffuse + specular + reflection
+        Vec3 color(0.0f);
+
+        // Ambient and diffuse
+        color += ambient;  // ambient
+
         float_t kd = intersectionToShade.material.kd;
-        Vec3 specular = intersectionToShade.material.specularColor;
-        float_t ks = intersectionToShade.material.ks;
-        float specularExponentShinyness = intersectionToShade.material.specularExponent;
-
-        color += ambient;
-
-        // repeat for all lights in the scene
-        for(auto& light: scene.lights){
-            // check for point light shadow: cast a ray from the intersection point to the light source
-
+        for(auto& light: scene.lights) {
             Vec3 L = (light.position - intersectionToShade.point).normalized();
-            Vec3 shadowRayOrigin = intersectionToShade.point + L * (100 * epsilon);  // Move the origin slightly to avoid self-intersection
-
-            if(auto shadowIntersection = traceRayToClosestSceneIntersection(Ray(shadowRayOrigin, L))){
-                // if the shadow intersection is closer to the light source than the intersection point, the intersection point is in shadow
-                if((shadowIntersection->point - intersectionToShade.point).length() < (light.position - intersectionToShade.point).length())
-                    continue;
-            }
+            if(isInShadow(L))
+                continue;
 
             Vec3 N = intersectionToShade.surfaceNormal;
-
             float diff = std::max(N.dot(L), 0.0f);
-            Vec3 diffuseTerm = diffuse * diff * light.intensityPerColor * kd;
-
-            Vec3 V = -intersectionToShade.incomingRay.direction.normalized();  // Use the ray direction from the intersection
-            Vec3 H = (L + V).normalized();
-            float spec = std::pow(std::max(N.dot(H), 0.0f), specularExponentShinyness);
-            Vec3 specularTerm = specular * spec * light.intensityPerColor * ks;
-
-            color += diffuseTerm + specularTerm;
-
+            color += diffuse * diff * light.intensityPerColor * kd;  // diffuse
         }
 
+        // Add specular for all materials
+        color += calculateSpecularHighlights();
 
-        // reflections
-        
-        // only reflect if material is reflective
-        if(intersectionToShade.material.reflectivity.has_value()){
-            // if we hit nothing in the reflection, it reflects the background
+        // Handle reflection if material is reflective
+        // TODO could do fresnel here and for refractivity
+        if(intersectionToShade.material.reflectivity.has_value()) {
             Vec3 reflectedColor = scene.backgroundColor;
-
-            // perfect reflection
-            // TODO modify direction based on reflectivity?
-            Vec3 reflectionDir = intersectionToShade.incomingRay.direction - intersectionToShade.surfaceNormal * 2 * (intersectionToShade.incomingRay.direction.dot(intersectionToShade.surfaceNormal));
+            Vec3 reflectionDir = intersectionToShade.incomingRay.direction - 
+                intersectionToShade.surfaceNormal * 2 * 
+                (intersectionToShade.incomingRay.direction.dot(intersectionToShade.surfaceNormal));
             Ray reflectionRay(intersectionToShade.point + reflectionDir * (10 * epsilon), reflectionDir);
 
-            if (auto reflectionIntersection = traceRayToClosestSceneIntersection(reflectionRay))
-                reflectedColor = blinnPhongShading(*reflectionIntersection, bounces + 1);
-            // mix the reflected color with the current color
-            color = color.lerp(reflectedColor, *intersectionToShade.material.reflectivity);
+            if (auto reflectionIntersection = traceRayToClosestSceneIntersection(reflectionRay)) {
+                reflectedColor = blinnPhongShading(*reflectionIntersection, bounces + 1, currentIOR);
+            }
 
-            // TODO problem: basically need tone map *intensity*, not a boolean yes/no for tone mapping, because if we're lerping, we need to only tone map the part of the color that's "real" and not the background
-            // -> would be much easier if we were just tone mapping the background as well...
+            color = color.lerp(reflectedColor, *intersectionToShade.material.reflectivity);
         }
 
         return color;
