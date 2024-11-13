@@ -6,11 +6,11 @@
             "type":"pinhole", 
             "width":1200, 
             "height":800,
-            "position":[0.0, 0.75, -0.25],
+            "position":[-1.0, 0.75, -1.25],
             "lookAt":[0.0, 0.35, 1.0],
             "upVector":[0.0, 1.0, 0.0],
-            "fov":95.0,
-            "exposure":0.3
+            "fov":85.0,
+            "exposure":0.27
         },
     "scene":
         { 
@@ -18,7 +18,7 @@
             "lightsources":[ 
                 { 
                     "type":"pointlight", 
-                    "position":[0, 3.0, 5.5], 
+                    "position":[0, 2.0, 5.5], 
                     "intensity":[0.5, 0.5, 0.5] 
                 }
             ], 
@@ -43,7 +43,7 @@
                 },
                 {
                     "type": "sphere",
-                    "center": [-1.3, 0.19, 1],
+                    "center": [-1.3, 0.25, 1],
                     "radius": 0.55,
                     "height": 0.2,
                     "material":
@@ -59,7 +59,43 @@
                             "refractiveindex":1.01 ,
                             "texture": "textures/globe.ppm"
                         } 
-                }
+                },
+                { 
+                    "type":"triangle", 
+                    "v0": [ -10, -0.5, 20],
+                    "v1": [ 10, -0.5, 20],
+                    "v2": [ 10, -0.5, -20],
+                    "material":
+                        { 
+                            "ks":0.05, 
+                            "kd":0.9, 
+                            "specularexponent":20, 
+                            "diffusecolor":[1,1,1],
+                            "specularcolor":[0.957,0.8,0.6716],
+                            "isreflective":false,
+                            "reflectivity":1.0,
+                            "isrefractive":true,
+                            "refractiveindex":1.0 
+                        } 
+                },
+                { 
+                    "type":"triangle", 
+                    "v0": [-10, -0.5, -20],
+                    "v1": [-10, -0.5, 20],
+                    "v2": [ 10, -0.5, -20],
+                    "material":
+                        { 
+                            "ks":0.05, 
+                            "kd":0.9, 
+                            "specularexponent":20, 
+                            "diffusecolor":[1,1,1],
+                            "specularcolor":[0.957,0.8,0.6716],
+                            "isreflective":false,
+                            "reflectivity":1.0,
+                            "isrefractive":true,
+                            "refractiveindex":1.0 
+                        } 
+                }  
             ] 
         } 
 }
