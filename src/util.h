@@ -20,6 +20,24 @@ inline bool implies(bool a, bool b){
 
 struct Vec2{
     float_t x,y;
+
+    // see Vec3 for details on these operators
+
+    Vec2 operator+(const Vec2& other) const{
+        return Vec2(x+other.x, y+other.y);
+    }
+
+    Vec2 operator-(const Vec2& other) const{
+        return Vec2(x-other.x, y-other.y);
+    }
+
+    Vec2 operator*(float_t scalar) const{
+        return Vec2(x*scalar, y*scalar);
+    }
+
+    friend Vec2 operator*(float scalar, const Vec2& vec) {
+        return vec * scalar;
+    }
 };
 
 struct Vec3{
@@ -42,6 +60,11 @@ struct Vec3{
         return Vec3(x*scalar, y*scalar, z*scalar);
     }
 
+    // Friend function to overload for scalar * vector
+    friend Vec3 operator*(float scalar, const Vec3& vec) {
+        return vec * scalar;
+    }
+
     Vec3 operator/(float_t scalar) const{
         return Vec3(x/scalar, y/scalar, z/scalar);
     }
@@ -62,7 +85,7 @@ struct Vec3{
             std::abs(z - other.z) < epsilon;
     }
 
-    Vec3 operator-() {
+    Vec3 operator-() const {
         return *this * -1;
     }
 
@@ -160,6 +183,9 @@ struct Ray{
     Vec3 origin;
     Vec3 direction;
 
+
+    // TODO maybe make some kind of "prevent self intersection" constructor to dedupliate some code
+
     /// assumes that the direction is normalized!
     Ray(Vec3 origin, Vec3 direction)
         : origin(origin), direction(direction){
@@ -189,7 +215,7 @@ struct Camera{
            Vec3 up,
            float_t width,
            float_t height,
-           float_t exposure) : position(position), direction((lookAt - position).normalized()), down(-(up.normalized())), right(lookAt.cross(down).normalized()), width(width), widthPixels(std::round(width)), height(height), heightPixels(std::round(height)), exposure(exposure){
+           float_t exposure) : position(position), direction((lookAt - position).normalized()), down(-(up.normalized())), right(direction.cross(down).normalized()), width(width), widthPixels(std::round(width)), height(height), heightPixels(std::round(height)), exposure(exposure){
         const float_t aspectRatio = width / height;
         imagePlaneDimensions = Vec2(aspectRatio*imagePlaneHeight, imagePlaneHeight);
     }
@@ -275,6 +301,43 @@ struct PinholePerspectiveCamera : public Camera{
     }
 };
 
+struct Color8Bit{
+    uint8_t r,g,b;
+};
+
+struct Texture{
+    uint32_t width, height;
+    // dont use vectors, would waste memory
+    // TODO check vs performance benefit of not having to convert to Vec3 at runtime
+    std::vector<Color8Bit> pixels;
+
+    Texture(uint32_t width, uint32_t height, std::vector<Color8Bit> pixels)
+        : width(width), height(height), pixels(pixels){
+        assert(width * height == pixels.size() && "Texture dimensions don't match pixel count");
+    }
+
+    /// initialize an empty texture to be filled later
+    Texture(uint32_t width, uint32_t height)
+        : width(width), height(height), pixels(width*height){ }
+
+    void fillUninitialized(std::vector<Color8Bit>&& pixels){
+        assert(width * height == pixels.size() && "Texture dimensions don't match pixel count");
+        this->pixels = std::move(pixels);
+    }
+
+    Vec3 colorAt(Vec2 textureCoords) const{
+        // wrap around
+        float_t x = std::fmod(textureCoords.x, 1.);
+        float_t y = std::fmod(textureCoords.y, 1.);
+
+        // scale to pixel space
+        uint32_t pixelX = static_cast<uint32_t>(x * width);
+        uint32_t pixelY = static_cast<uint32_t>(y * height);
+
+        auto pixel = pixels[pixelY * width + pixelX];
+        return Vec3(pixel.r / 255., pixel.g / 255., pixel.b / 255.);
+    }
+};
 
 struct PhongMaterial {
     Vec3 diffuseColor;
@@ -283,6 +346,8 @@ struct PhongMaterial {
     uint64_t specularExponent;
     std::optional<float_t> reflectivity;
     std::optional<float_t> refractiveIndex;
+    // share textures to reduce memory usage
+    std::optional<std::shared_ptr<Texture>> texture;
 
     PhongMaterial(
             Vec3 diffuseColor,
@@ -291,8 +356,19 @@ struct PhongMaterial {
             float_t kd,
             uint64_t specularExponent,
             std::optional<float_t> reflectivity,
-            std::optional<float_t> refractiveIndex)
-        : diffuseColor(diffuseColor), specularColor(specularColor), ks(ks), kd(kd), specularExponent(specularExponent), reflectivity(reflectivity), refractiveIndex(refractiveIndex){ }
+            std::optional<float_t> refractiveIndex,
+            std::optional<std::shared_ptr<Texture>> texture)
+        : diffuseColor(diffuseColor), specularColor(specularColor), ks(ks), kd(kd), specularExponent(specularExponent), reflectivity(reflectivity), refractiveIndex(refractiveIndex), texture(texture){ }
+
+    /// if the material has a texture, get the diffuse color at the given texture coordinates,
+    /// otherwise just return the diffuse color
+    /// The texture coordinates here need to be interpolated from the vertices of e.g. the triangle
+    Vec3 diffuseColorAtTextureCoords(Vec2 textureCoords) const {
+        if(texture.has_value())
+            return (*texture)->colorAt(textureCoords);
+        else
+            return diffuseColor;
+    }
 };
 
 //struct Material{
@@ -309,9 +385,10 @@ struct Intersection{
     Vec3 point;
     Vec3 surfaceNormal;
     PhongMaterial material;
+    Vec2 textureCoords;
 
-    Intersection(Ray incomingray, Vec3 point, Vec3 surfaceNormal, PhongMaterial material)
-        : incomingRay(incomingray), point(point), surfaceNormal(surfaceNormal), material(material){
+    Intersection(Ray incomingray, Vec3 point, Vec3 surfaceNormal, PhongMaterial material, Vec2 textureCoords)
+        : incomingRay(incomingray), point(point), surfaceNormal(surfaceNormal), material(material), textureCoords(textureCoords){
         assert(surfaceNormal == surfaceNormal.normalized() && "Surface normal must be normalized");
     }
 
@@ -325,7 +402,7 @@ inline PhongMaterial givenMaterialOrDefault(std::optional<PhongMaterial> materia
         return std::move(material.value());
     else
         // default material, because the json format allows for no material to be specified
-        return PhongMaterial(Vec3(1,1,1), Vec3(1,1,1), 0.5, 0.5, 32, 0.0, 0.0);
+        return PhongMaterial(Vec3(1,1,1), Vec3(1,1,1), 0.5, 0.5, 32, 0.0, 0.0, std::nullopt);
 }
 
 struct Sphere {
@@ -372,7 +449,18 @@ struct Sphere {
         Vec3 intersectionPoint = ray.origin + ray.direction * t;
         Vec3 intersectionNormal = (intersectionPoint - center).normalized();
 
-        return Intersection(ray, std::move(intersectionPoint), std::move(intersectionNormal), material);
+        // Calculate texture coordinates
+        Vec3 localPoint = (intersectionPoint - center) / radius; // Normalize to unit sphere
+
+        // Calculate spherical coordinates
+        float theta = std::atan2(localPoint.z, localPoint.x); // Longitude
+        float phi = std::acos(localPoint.y);                  // Latitude
+
+        // Map spherical coordinates to texture coordinates (u, v)
+        float u = (theta + M_PI) / (2 * M_PI);
+        float v = phi / M_PI;
+
+        return Intersection(ray, std::move(intersectionPoint), std::move(intersectionNormal), material, Vec2(u, v));
     }
 
 };
@@ -413,7 +501,8 @@ struct Cylinder {
                 // Check if intersection point is within height limits of the cylinder
                 if (projectionOnAxis >= -eachSideHeight && projectionOnAxis <= eachSideHeight) {
                     Vec3 normal = (localPoint - axis * projectionOnAxis).normalized();
-                    Intersection intersection(ray, point, normal, material);
+                    Intersection intersection(ray, point, normal, material, textCoordsOfSideIntersection(point));
+
 
                     // Update closest intersection
                     if (!closestIntersection || t < (closestIntersection->point - ray.origin).length()) {
@@ -433,7 +522,7 @@ struct Cylinder {
 
             Vec3 point = ray.origin + ray.direction * tCap;
             if ((point - capCenter).length() <= radius) {  // Check if within radius of cap
-                Intersection intersection(ray, point, capNormal, material);
+                Intersection intersection(ray, point, capNormal, material, textCoordsOfCapIntersection(point));
                 return intersection;
             }
             return std::nullopt;
@@ -452,17 +541,48 @@ struct Cylinder {
 
         return closestIntersection;
     }
+
+private:
+    Vec2 textCoordsOfSideIntersection(const Vec3& intersectionPoint) const {
+        Vec3 baseToIntersection = intersectionPoint - (center - axis * eachSideHeight);
+        float vPosAlongAxis = baseToIntersection.dot(axis);        
+        float v = vPosAlongAxis / (2 * eachSideHeight);  // Map height position to v in [0, 1]
+
+        Vec3 circumferentialDir = (baseToIntersection - axis * vPosAlongAxis).normalized();
+        float theta = std::atan2(circumferentialDir.z, circumferentialDir.x);        
+        float u = (theta + M_PI) / (2 * M_PI);  // Map angle to u in [0, 1]
+
+        return Vec2(u,v);
+    }
+
+    Vec2 textCoordsOfCapIntersection(const Vec3& intersectionPoint) const {
+        // Determine which cap (top or bottom) we're on based on axis direction and height
+        Vec3 capCenter = intersectionPoint.dot(axis) > 0 ? (center + axis * eachSideHeight) : (center - axis * eachSideHeight);
+        Vec3 localCapPoint = intersectionPoint - capCenter;
+
+        // Map `localCapPoint` to polar coordinates within the cap radius
+        float r = localCapPoint.length() / radius;  // Distance from center mapped to [0, 1]
+        float capTheta = std::atan2(localCapPoint.z, localCapPoint.x);
+
+        float u = 0.5f + r * std::cos(capTheta) / 2;  // Map radial distance and angle to texture u
+        float v = 0.5f + r * std::sin(capTheta) / 2;  // Map radial distance and angle to texture v
+
+        return Vec2(u,v);
+    }
 };
 
 struct Triangle {
     Vec3 v0,v1,v2;
     // TODO could try deduplicating materials for triangle objects later on, for big meshes that all have the same material
     PhongMaterial material;
+    // these are only valid if the material has a texture
+    Vec2 texCoordv0, texCoordv1, texCoordv2;
 
-    Triangle(Vec3 v0, Vec3 v1, Vec3 v2, std::optional<PhongMaterial> material)
-        : v0(v0), v1(v1), v2(v2), material(givenMaterialOrDefault(std::move(material))){ }
+    Triangle(Vec3 v0, Vec3 v1, Vec3 v2, std::optional<PhongMaterial> material, Vec2 texCoordv0, Vec2 texCoordv1, Vec2 texCoordv2)
+        : v0(v0), v1(v1), v2(v2), material(givenMaterialOrDefault(std::move(material))), texCoordv0(texCoordv0), texCoordv1(texCoordv1), texCoordv2(texCoordv2){ }
 
     Vec3 faceNormal() const{
+        // TODO in the future, could interpolate this with the rest of the mesh
         return (v1-v0).cross(v2-v0);
     }
 
@@ -500,7 +620,14 @@ struct Triangle {
             Vec3 intersectionPoint = ray.origin + ray.direction * t;
             Vec3 normal = faceNormal().normalized();  // Use the constant normal for the triangle
 
-            return Intersection(ray, intersectionPoint, normal, material);
+            // interpolate texture coordinates
+            // calculate barycentric coordinate `w`
+            float w = 1.0f - u - v;
+
+            // interpolate the texture coordinates using barycentric weights
+            Vec2 interpolatedTexCoord = texCoordv0 * w + texCoordv1 * u + texCoordv2 * v;
+
+            return Intersection(ray, intersectionPoint, normal, material, interpolatedTexCoord);
         }
 
         return std::nullopt;
@@ -563,13 +690,49 @@ struct Renderer{
 
     /// shades a single intersection point
     /// outputs an un-tonemapped color, not for immediate display
-    Vec3 blinnPhongShading(const Intersection& intersectionToShade, uint32_t bounces = 1){
+    Vec3 blinnPhongShading(const Intersection& intersectionToShade, uint32_t bounces = 1, float_t currentIOR = 1.0f){
         if (bounces > scene.nBounces)
             return Vec3(0.0f);
 
         Vec3 color(0.0f);
 
-        Vec3 diffuse = intersectionToShade.material.diffuseColor;
+
+        // TODO refractions: not entirely right at the moment?
+        // If the material is refractive (transparent), we only want the refracted color
+        if (intersectionToShade.material.refractiveIndex.has_value()) {
+            Vec3 refractedColor = scene.backgroundColor;
+            float materialIOR = *intersectionToShade.material.refractiveIndex;
+
+            // Determine if we're entering or exiting the material
+            bool entering = intersectionToShade.incomingRay.direction.dot(intersectionToShade.surfaceNormal) < 0;
+            Vec3 normal = entering ? intersectionToShade.surfaceNormal : -intersectionToShade.surfaceNormal;
+
+            // Calculate IOR ratio based on whether we're entering or exiting
+            float etaRatio = entering ? currentIOR / materialIOR : materialIOR / currentIOR;
+
+            float cosTheta_i = -normal.dot(intersectionToShade.incomingRay.direction);
+            float sinTheta_t_squared = etaRatio * etaRatio * (1.0f - cosTheta_i * cosTheta_i);
+
+            // Check for total internal reflection
+            if (sinTheta_t_squared <= 1.0f) {
+                float cosTheta_t = std::sqrt(1.0f - sinTheta_t_squared);
+                Vec3 refractedDir = etaRatio * intersectionToShade.incomingRay.direction +
+                    (etaRatio * cosTheta_i - cosTheta_t) * normal;
+
+                Ray refractedRay(intersectionToShade.point + refractedDir * (10 * epsilon), refractedDir);
+
+                // Pass the new IOR to the recursive call
+                float nextIOR = entering ? materialIOR : 1.0f;
+                if (auto refractedIntersection = traceRayToClosestSceneIntersection(refractedRay)) {
+                    refractedColor = blinnPhongShading(*refractedIntersection, bounces + 1, nextIOR);
+                }
+
+                return refractedColor;  // For transparent materials, we only return the refracted color
+            }
+            // In case of total internal reflection, fall through to regular shading
+        }
+
+        Vec3 diffuse = intersectionToShade.material.diffuseColorAtTextureCoords(intersectionToShade.textureCoords);
         // to match the given example renders, it seems they used ambient light in the same color as the diffuse light of each object
         float_t ambientIntensity = 0.25f;
         Vec3 ambient = diffuse * ambientIntensity;
@@ -608,28 +771,39 @@ struct Renderer{
 
         }
 
+
         // reflections
+        
         // only reflect if material is reflective
         if(intersectionToShade.material.reflectivity.has_value()){
+            // if we hit nothing in the reflection, it reflects the background
+            Vec3 reflectedColor = scene.backgroundColor;
+
             // perfect reflection
             // TODO modify direction based on reflectivity?
             Vec3 reflectionDir = intersectionToShade.incomingRay.direction - intersectionToShade.surfaceNormal * 2 * (intersectionToShade.incomingRay.direction.dot(intersectionToShade.surfaceNormal));
             Ray reflectionRay(intersectionToShade.point + reflectionDir * (10 * epsilon), reflectionDir);
 
-            Vec3 reflectedColor = scene.backgroundColor;
-            if (auto reflectionIntersection = traceRayToClosestSceneIntersection(reflectionRay)) {
+            if (auto reflectionIntersection = traceRayToClosestSceneIntersection(reflectionRay))
                 reflectedColor = blinnPhongShading(*reflectionIntersection, bounces + 1);
-            }
+            // mix the reflected color with the current color
             color = color.lerp(reflectedColor, *intersectionToShade.material.reflectivity);
+
+            // TODO problem: basically need tone map *intensity*, not a boolean yes/no for tone mapping, because if we're lerping, we need to only tone map the part of the color that's "real" and not the background
+            // -> would be much easier if we were just tone mapping the background as well...
         }
 
         return color;
     }
 
+    Vec3 linearToneMapping(Vec3 color){
+        return (color*scene.camera->exposure * 15.).clamp(0.0f, 1.0f);
+    }
+
     Vec3 shadeIntersection(const Intersection& intersectionToShade){
         // "0th" bounce: decide on the shading model, and do tone mapping
         auto shadedHDRColor = blinnPhongShading(intersectionToShade);
-        auto toneMapped = (shadedHDRColor*scene.camera->exposure * 15.).clamp(0.0f, 1.0f);
+        auto toneMapped = linearToneMapping(shadedHDRColor);
         return toneMapped;
     }
 
@@ -649,7 +823,7 @@ struct Renderer{
     template<RenderMode mode>
     void render(){
 // cant try gpu openacc because nvcc doesnt support c++23 :(
-// openacc with gcc is about 5x slower than openmp
+// openacc might not work at all with gcc here, is basically the same time as serial
 //#pragma acc parallel loop
 #pragma omp parallel for
         for(uint32_t y = 0; y < scene.camera->heightPixels; y++){
@@ -660,7 +834,7 @@ struct Renderer{
                 // TODO get closest intersection, not just test one
                 auto closestIntersection = traceRayToClosestSceneIntersection(cameraRay);
 
-                Vec3 pixelColor = scene.backgroundColor;
+                Vec3 pixelColor = linearToneMapping(scene.backgroundColor);
                 if(closestIntersection.has_value()){
                     if constexpr (mode == RenderMode::BINARY){
                         pixelColor = Vec3(1.0);
