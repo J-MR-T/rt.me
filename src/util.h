@@ -702,12 +702,12 @@ struct Renderer{
         float_t ks = intersectionToShade.material.ks;
         float specularExponentShinyness = intersectionToShade.material.specularExponent;
 
-        auto isInShadow = [&](const Vec3& L) -> bool {
+        auto isInShadow = [&](const PointLight& light, const Vec3& L) -> bool {
             Vec3 shadowRayOrigin = intersectionToShade.point + L * (100 * epsilon);
             Ray shadowRay(shadowRayOrigin, L);
 
             if (auto shadowIntersection = traceRayToClosestSceneIntersection(shadowRay)) {
-                return (shadowIntersection->point - intersectionToShade.point).length() < (scene.lights[0].position - intersectionToShade.point).length();
+                return (shadowIntersection->point - intersectionToShade.point).length() < (light.position - intersectionToShade.point).length();
             }
             return false;
         };
@@ -716,9 +716,9 @@ struct Renderer{
         auto calculateSpecularHighlights = [&]() -> Vec3 {
             Vec3 specularSum(0.0f);
 
-            for(auto& light: scene.lights) {
+            for(const auto& light: scene.lights) {
                 Vec3 L = (light.position - intersectionToShade.point).normalized();
-                if(isInShadow(L))
+                if(isInShadow(light, L))
                     continue;
 
                 Vec3 V = -intersectionToShade.incomingRay.direction.normalized();
@@ -778,9 +778,9 @@ struct Renderer{
         color += ambient;  // ambient
 
         float_t kd = intersectionToShade.material.kd;
-        for(auto& light: scene.lights) {
+        for(const auto& light: scene.lights) {
             Vec3 L = (light.position - intersectionToShade.point).normalized();
-            if(isInShadow(L))
+            if(isInShadow(light, L))
                 continue;
 
             Vec3 N = intersectionToShade.surfaceNormal;
