@@ -2,12 +2,14 @@
 #include <cassert>
 #include <cmath>
 #include <memory>
+#include <random>
 #include <vector>
 #include <optional>
 #include <cstdint>
 #include <string>
 #include <fstream>
 #include <print>
+#include <atomic>
 
 // single precision for now
 using float_t = float;
@@ -35,8 +37,24 @@ struct Vec2{
         return Vec2(x*scalar, y*scalar);
     }
 
-    friend Vec2 operator*(float scalar, const Vec2& vec) {
+    Vec2 operator/(float_t scalar) const{
+        return Vec2(x/scalar, y/scalar);
+    }
+
+    friend Vec2 operator*(float_t scalar, const Vec2& vec) {
         return vec * scalar;
+    }
+
+    float_t dot(const Vec2& other) const{
+        return x*other.x + y*other.y;
+    }
+
+    float_t length() const{
+        return std::sqrt(dot(*this));
+    }
+
+    Vec2 normalized() const{
+        return *this / length();
     }
 };
 
@@ -61,8 +79,11 @@ struct Vec3{
     }
 
     // Friend function to overload for scalar * vector
-    friend Vec3 operator*(float scalar, const Vec3& vec) {
+    friend Vec3 operator*(float_t scalar, const Vec3& vec) {
         return vec * scalar;
+    }
+    friend Vec3 operator/(float_t scalar, const Vec3& vec) {
+        return vec / scalar;
     }
 
     Vec3 operator/(float_t scalar) const{
@@ -83,6 +104,11 @@ struct Vec3{
         return std::abs(x - other.x) < epsilon &&
             std::abs(y - other.y) < epsilon &&
             std::abs(z - other.z) < epsilon;
+    }
+
+    float_t operator[](size_t index) const{
+        assert(index < 3 && "Index out of bounds");
+        return index == 0 ? x : (index == 1 ? y : z);
     }
 
     Vec3 operator-() const {
@@ -134,6 +160,26 @@ struct Vec3{
     Vec3 lerp(const Vec3& other, float_t t) const{
         return *this * (1-t) + other * t;
     }
+
+    Vec3 min(const Vec3& other) const{
+        return Vec3(
+            std::min(x, other.x),
+            std::min(y, other.y),
+            std::min(z, other.z)
+        );
+    }
+
+    Vec3 max(const Vec3& other) const{
+        return Vec3(
+            std::max(x, other.x),
+            std::max(y, other.y),
+            std::max(z, other.z)
+        );
+    }
+
+    float_t distance(const Vec3& other) const{
+        return (*this - other).length();
+    }
 };
 
 struct PPMWriter{
@@ -182,15 +228,19 @@ public:
 struct Ray{
     Vec3 origin;
     Vec3 direction;
-
+    Vec3 invDirection;
 
     // TODO maybe make some kind of "prevent self intersection" constructor to dedupliate some code
 
     /// assumes that the direction is normalized!
-    Ray(Vec3 origin, Vec3 direction)
-        : origin(origin), direction(direction){
+    Ray(Vec3 origin, Vec3 direction, Vec3 invDirection)
+        : origin(origin), direction(direction), invDirection(invDirection){
         assert(direction == direction.normalized() && "Ray direction must be normalized");
+        assert(invDirection == 1./direction && "Ray inverse direction must be the reciprocal of the direction");
     }
+
+    Ray(Vec3 origin, Vec3 direction) : Ray(origin, direction, 1./direction){}
+
 };
 
 // TODO could use CRTP later, but normal dynamic dispatch is fine for now
@@ -346,6 +396,8 @@ struct PhongMaterial {
     uint64_t specularExponent;
     std::optional<float_t> reflectivity;
     std::optional<float_t> refractiveIndex;
+    // TODO somehow indicate that this is not used for phong (and rename this material accordingly)
+    std::optional<Vec3> emissionColor;
     // share textures to reduce memory usage
     std::optional<std::shared_ptr<Texture>> texture;
 
@@ -357,8 +409,9 @@ struct PhongMaterial {
             uint64_t specularExponent,
             std::optional<float_t> reflectivity,
             std::optional<float_t> refractiveIndex,
+            std::optional<Vec3> emissionColor,
             std::optional<std::shared_ptr<Texture>> texture)
-        : diffuseColor(diffuseColor), specularColor(specularColor), ks(ks), kd(kd), specularExponent(specularExponent), reflectivity(reflectivity), refractiveIndex(refractiveIndex), texture(texture){ }
+        : diffuseColor(diffuseColor), specularColor(specularColor), ks(ks), kd(kd), specularExponent(specularExponent), reflectivity(reflectivity), refractiveIndex(refractiveIndex), emissionColor(emissionColor), texture(texture){ }
 
     /// if the material has a texture, get the diffuse color at the given texture coordinates,
     /// otherwise just return the diffuse color
@@ -381,20 +434,23 @@ struct PhongMaterial {
 
 struct Intersection{
     // ray that caused the intersection
-    Ray incomingRay;
+    const Ray* incomingRay;
+    // TODO instead of storing the intersection point, could store the distance along the ray
     Vec3 point;
     Vec3 surfaceNormal;
-    PhongMaterial material;
+    const PhongMaterial* material;
     Vec2 textureCoords;
 
-    Intersection(Ray incomingray, Vec3 point, Vec3 surfaceNormal, PhongMaterial material, Vec2 textureCoords)
+    Intersection(const Ray* incomingray, Vec3 point, Vec3 surfaceNormal, const PhongMaterial* material, Vec2 textureCoords)
         : incomingRay(incomingray), point(point), surfaceNormal(surfaceNormal), material(material), textureCoords(textureCoords){
         assert(surfaceNormal == surfaceNormal.normalized() && "Surface normal must be normalized");
     }
 
     float_t distance() const{
-        return (point - incomingRay.origin).length();
+        return (point - incomingRay->origin).length();
     }
+
+
 };
 
 inline PhongMaterial givenMaterialOrDefault(std::optional<PhongMaterial> material){
@@ -402,7 +458,7 @@ inline PhongMaterial givenMaterialOrDefault(std::optional<PhongMaterial> materia
         return std::move(material.value());
     else
         // default material, because the json format allows for no material to be specified
-        return PhongMaterial(Vec3(1,1,1), Vec3(1,1,1), 0.5, 0.5, 32, 0.0, 0.0, std::nullopt);
+        return PhongMaterial(Vec3(1,1,1), Vec3(1,1,1), 0.5, 0.5, 32, 0.0, 0.0, std::nullopt, std::nullopt);
 }
 
 struct Sphere {
@@ -413,7 +469,7 @@ struct Sphere {
     Sphere(Vec3 center, float_t radius, std::optional<PhongMaterial> material)
         : center(center), radius(radius), material(givenMaterialOrDefault(std::move(material))){ }
 
-    std::optional<Intersection> intersect(const Ray& ray) {
+    std::optional<Intersection> intersect(const Ray& ray) const {
         // mostly generated by chatgpt
 
         // Vector from the ray's origin to the sphere's center
@@ -453,16 +509,20 @@ struct Sphere {
         Vec3 localPoint = (intersectionPoint - center) / radius; // Normalize to unit sphere
 
         // Calculate spherical coordinates
-        float theta = std::atan2(localPoint.z, localPoint.x); // Longitude
-        float phi = std::acos(localPoint.y);                  // Latitude
+        float_t theta = std::atan2(localPoint.z, localPoint.x); // Longitude
+        float_t phi = std::acos(localPoint.y);                  // Latitude
 
         // Map spherical coordinates to texture coordinates (u, v)
-        float u = (theta + M_PI) / (2 * M_PI);
-        float v = phi / M_PI;
+        float_t u = (theta + M_PI) / (2 * M_PI);
+        float_t v = phi / M_PI;
 
-        return Intersection(ray, std::move(intersectionPoint), std::move(intersectionNormal), material, Vec2(u, v));
+        return Intersection(&ray, std::move(intersectionPoint), std::move(intersectionNormal), &material, Vec2(u, v));
     }
 
+    /// equality (explicitly do not check for material, because two spheres with the exact same position and geometry should not have different materials; this is the same for all other shapes)
+    bool operator==(const Sphere& other) const {
+        return center == other.center && radius == other.radius;
+    }
 };
 
 struct Cylinder {
@@ -475,33 +535,33 @@ struct Cylinder {
     Cylinder(Vec3 center, float_t radius, float_t height, Vec3 axis, std::optional<PhongMaterial> material)
         : center(center), radius(radius), eachSideHeight(height), axis(axis), material(givenMaterialOrDefault(std::move(material))){ }
 
-    std::optional<Intersection> intersect(const Ray& ray) {
+    std::optional<Intersection> intersect(const Ray& ray) const {
         // mostly generated by chatgpt
 
         Vec3 d = ray.direction - axis * ray.direction.dot(axis);  // Projected ray direction onto the cylinder's plane
         Vec3 oc = ray.origin - center;
         Vec3 oc_proj = oc - axis * oc.dot(axis);                  // Projected ray origin onto the cylinder's plane
 
-        float a = d.dot(d);
-        float b = 2.0f * d.dot(oc_proj);
-        float c = oc_proj.dot(oc_proj) - radius * radius;
+        float_t a = d.dot(d);
+        float_t b = 2.0f * d.dot(oc_proj);
+        float_t c = oc_proj.dot(oc_proj) - radius * radius;
         std::optional<Intersection> closestIntersection = std::nullopt;
 
         // Quadratic discriminant for side wall intersection
-        float discriminant = b * b - 4 * a * c;
+        float_t discriminant = b * b - 4 * a * c;
         if (discriminant >= 0) {
-            float sqrtDiscriminant = std::sqrt(discriminant);
-            for (float t : { (-b - sqrtDiscriminant) / (2.0 * a), (-b + sqrtDiscriminant) / (2.0 * a) }) {
+            float_t sqrtDiscriminant = std::sqrt(discriminant);
+            for (float_t t : { (-b - sqrtDiscriminant) / (2.0 * a), (-b + sqrtDiscriminant) / (2.0 * a) }) {
                 if (t < 0) continue;
 
                 Vec3 point = ray.origin + ray.direction * t;
                 Vec3 localPoint = point - center;
-                float projectionOnAxis = localPoint.dot(axis);
+                float_t projectionOnAxis = localPoint.dot(axis);
 
                 // Check if intersection point is within height limits of the cylinder
                 if (projectionOnAxis >= -eachSideHeight && projectionOnAxis <= eachSideHeight) {
                     Vec3 normal = (localPoint - axis * projectionOnAxis).normalized();
-                    Intersection intersection(ray, point, normal, material, textCoordsOfSideIntersection(point));
+                    Intersection intersection(&ray, point, normal, &material, textCoordsOfSideIntersection(point));
 
 
                     // Update closest intersection
@@ -512,17 +572,16 @@ struct Cylinder {
             }
         }
 
-        // Lambda to handle cap intersection
         auto checkCapIntersection = [&](const Vec3& capCenter, const Vec3& capNormal) -> std::optional<Intersection> {
-            float denom = ray.direction.dot(capNormal);
+            float_t denom = ray.direction.dot(capNormal);
             if (std::abs(denom) < 1e-6) return std::nullopt;
 
-            float tCap = (capCenter - ray.origin).dot(capNormal) / denom;
+            float_t tCap = (capCenter - ray.origin).dot(capNormal) / denom;
             if (tCap < 0) return std::nullopt;
 
             Vec3 point = ray.origin + ray.direction * tCap;
             if ((point - capCenter).length() <= radius) {  // Check if within radius of cap
-                Intersection intersection(ray, point, capNormal, material, textCoordsOfCapIntersection(point));
+                Intersection intersection(&ray, point, capNormal, &material, textCoordsOfCapIntersection(point));
                 return intersection;
             }
             return std::nullopt;
@@ -532,7 +591,7 @@ struct Cylinder {
         for (auto& cap : { std::make_pair(center - axis * eachSideHeight, -axis), 
                 std::make_pair(center + axis * eachSideHeight, axis) }) {
             if (auto capIntersection = checkCapIntersection(cap.first, cap.second); capIntersection) {
-                float capDistance = (capIntersection->point - ray.origin).length();
+                float_t capDistance = (capIntersection->point - ray.origin).length();
                 if (!closestIntersection || capDistance < (closestIntersection->point - ray.origin).length()) {
                     closestIntersection = capIntersection;
                 }
@@ -542,15 +601,19 @@ struct Cylinder {
         return closestIntersection;
     }
 
+    bool operator==(const Cylinder& other) const {
+        return center == other.center && radius == other.radius && eachSideHeight == other.eachSideHeight && axis == other.axis;
+    }
+
 private:
     Vec2 textCoordsOfSideIntersection(const Vec3& intersectionPoint) const {
         Vec3 baseToIntersection = intersectionPoint - (center - axis * eachSideHeight);
-        float vPosAlongAxis = baseToIntersection.dot(axis);        
-        float v = vPosAlongAxis / (2 * eachSideHeight);  // Map height position to v in [0, 1]
+        float_t vPosAlongAxis = baseToIntersection.dot(axis);        
+        float_t v = vPosAlongAxis / (2 * eachSideHeight);  // Map height position to v in [0, 1]
 
         Vec3 circumferentialDir = (baseToIntersection - axis * vPosAlongAxis).normalized();
-        float theta = std::atan2(circumferentialDir.z, circumferentialDir.x);        
-        float u = (theta + M_PI) / (2 * M_PI);  // Map angle to u in [0, 1]
+        float_t theta = std::atan2(circumferentialDir.z, circumferentialDir.x);        
+        float_t u = (theta + M_PI) / (2 * M_PI);  // Map angle to u in [0, 1]
 
         return Vec2(u,v);
     }
@@ -561,11 +624,11 @@ private:
         Vec3 localCapPoint = intersectionPoint - capCenter;
 
         // Map `localCapPoint` to polar coordinates within the cap radius
-        float r = localCapPoint.length() / radius;  // Distance from center mapped to [0, 1]
-        float capTheta = std::atan2(localCapPoint.z, localCapPoint.x);
+        float_t r = localCapPoint.length() / radius;  // Distance from center mapped to [0, 1]
+        float_t capTheta = std::atan2(localCapPoint.z, localCapPoint.x);
 
-        float u = 0.5f + r * std::cos(capTheta) / 2;  // Map radial distance and angle to texture u
-        float v = 0.5f + r * std::sin(capTheta) / 2;  // Map radial distance and angle to texture v
+        float_t u = 0.5f + r * std::cos(capTheta) / 2;  // Map radial distance and angle to texture u
+        float_t v = 0.5f + r * std::sin(capTheta) / 2;  // Map radial distance and angle to texture v
 
         return Vec2(u,v);
     }
@@ -578,59 +641,416 @@ struct Triangle {
     // these are only valid if the material has a texture
     Vec2 texCoordv0, texCoordv1, texCoordv2;
 
+    // TODO could precompute bounding box or mins/maxes for faster building of the BVH
+
+    Vec3 normal = (v1-v0).cross(v2-v0).normalized();
     Triangle(Vec3 v0, Vec3 v1, Vec3 v2, std::optional<PhongMaterial> material, Vec2 texCoordv0, Vec2 texCoordv1, Vec2 texCoordv2)
         : v0(v0), v1(v1), v2(v2), material(givenMaterialOrDefault(std::move(material))), texCoordv0(texCoordv0), texCoordv1(texCoordv1), texCoordv2(texCoordv2){ }
 
     Vec3 faceNormal() const{
         // TODO in the future, could interpolate this with the rest of the mesh
-        return (v1-v0).cross(v2-v0);
+        return normal;
     }
 
     // TODO normal vector interpolation at any point for smooth shading (requires knowledge of the rest of the mesh)
 
-    std::optional<Intersection> intersect(const Ray& ray) {
+    std::optional<Intersection> intersect(const Ray& ray) const {
         // Möller–Trumbore intersection
         // mostly generated by chatgpt
         Vec3 edge1 = v1 - v0;
         Vec3 edge2 = v2 - v0;
         Vec3 h = ray.direction.cross(edge2);
-        float a = edge1.dot(h);
+        float_t a = edge1.dot(h);
 
         // If a is near zero, the ray is parallel to the triangle
         if (std::abs(a) < epsilon) return std::nullopt;
 
-        float f = 1.0 / a;
+        float_t f = 1.0 / a;
         Vec3 s = ray.origin - v0;
-        float u = f * s.dot(h);
+        float_t u = f * s.dot(h);
 
         // Check if the intersection is outside the triangle
         if (u < 0.0 || u > 1.0) return std::nullopt;
 
         Vec3 q = s.cross(edge1);
-        float v = f * ray.direction.dot(q);
+        float_t v = f * ray.direction.dot(q);
 
         // Check if the intersection is outside the triangle
         if (v < 0.0 || u + v > 1.0) return std::nullopt;
 
         // Calculate the distance along the ray to the intersection point
-        float t = f * edge2.dot(q);
+        float_t t = f * edge2.dot(q);
 
         // Only accept intersections that are in front of the ray origin
         if (t > epsilon) {
             Vec3 intersectionPoint = ray.origin + ray.direction * t;
-            Vec3 normal = faceNormal().normalized();  // Use the constant normal for the triangle
+            Vec3 normal = faceNormal();  // Use the constant normal for the triangle
+
+            // Ensure the normal points against the ray's direction,
+            // we want to make sure that backfaces look like frontfaces
+            // TODO I think this makes stuff righter, in particular shadow calculations for flipped normals, but it also looks weird in some cases
+            //if (normal.dot(ray.direction) > 0) {
+                //normal = -normal;
+            //}
 
             // interpolate texture coordinates
             // calculate barycentric coordinate `w`
-            float w = 1.0f - u - v;
+            float_t w = 1.0f - u - v;
 
             // interpolate the texture coordinates using barycentric weights
             Vec2 interpolatedTexCoord = texCoordv0 * w + texCoordv1 * u + texCoordv2 * v;
 
-            return Intersection(ray, intersectionPoint, normal, material, interpolatedTexCoord);
+            return Intersection(&ray, intersectionPoint, normal, &material, interpolatedTexCoord);
         }
 
         return std::nullopt;
+    }
+    
+    bool operator==(const Triangle& other) const{
+        return v0 == other.v0 && v1 == other.v1 && v2 == other.v2;
+    }
+};
+
+struct SceneObject {
+    std::variant<Triangle, Sphere, Cylinder> variant;
+
+    std::optional<Intersection> intersect(const Ray& ray) const {
+        return std::visit([&](auto&& object){
+            return object.intersect(ray);
+        }, variant);
+    }
+
+    bool operator==(const SceneObject& other) const{
+        return variant == other.variant;
+    }
+};
+
+/// lightweight scene object reference
+/// (basically just an index into the scene's object list)
+struct SceneObjectReference{
+    size_t index;
+
+    explicit SceneObjectReference(size_t index)
+        : index(index){ }
+
+    /// finds the index of the object in the list
+    SceneObjectReference(const SceneObject& object, const std::vector<SceneObject>& objects){
+        index = std::distance(objects.begin(), std::find_if(objects.begin(), objects.end(), [&](const SceneObject& other){
+            if constexpr(std::is_same_v<decltype(object), decltype(other)>){
+                return object == other;
+            }
+            return false;
+        }));
+    }
+
+    SceneObject& dereference(auto& scene){
+        return scene.objects[index];
+    }
+
+    SceneObject& dereference(std::vector<SceneObject>& objects){
+        return objects[index];
+    }
+};
+
+struct BoundingBox{
+    Vec3 min, max;
+
+    BoundingBox() :
+          min(Vec3(std::numeric_limits<float_t>::max()))
+        , max(Vec3(-std::numeric_limits<float_t>::max())) 
+    { }
+
+    /// assumes min and max are actually <= each other, componentwise
+    BoundingBox(Vec3 min, Vec3 max)
+        : min(min), max(max){
+        assert(min.x <= max.x && min.y <= max.y && min.z <= max.z && "Trying to construct invalid bounding box");
+    }
+
+    // TODO look at the min/max 0 things, there has to be a better way
+    explicit BoundingBox(SceneObject object): min(0.), max(0.){
+        std::visit([this](auto&& object){
+            using T = std::decay_t<decltype(object)>;
+            if constexpr(std::is_same_v<T, Triangle>){
+                min = Vec3(
+                    std::min({object.v0.x, object.v1.x, object.v2.x}),
+                    std::min({object.v0.y, object.v1.y, object.v2.y}),
+                    std::min({object.v0.z, object.v1.z, object.v2.z})
+                );
+                max = Vec3(
+                    std::max({object.v0.x, object.v1.x, object.v2.x}),
+                    std::max({object.v0.y, object.v1.y, object.v2.y}),
+                    std::max({object.v0.z, object.v1.z, object.v2.z})
+                );
+            }else if constexpr(std::is_same_v<T, Sphere>){
+                min = object.center - Vec3(object.radius);
+                max = object.center + Vec3(object.radius);
+            }else if constexpr(std::is_same_v<T, Cylinder>){
+                // cylinder can be encompassed in a box with one corner at one side of the bottom cap, and the other at the other side of the top cap
+                const Vec3 bottomCapCenter = object.center - object.axis * object.eachSideHeight;
+                const Vec3 topCapCenter = object.center + object.axis * object.eachSideHeight;
+
+                // we'll be shifting points along the 2 "cap" axes (by the radius), so mask out the "height" axis of the cylinder
+                const Vec3 axisMask = Vec3(1.) - object.axis;
+                // and then invert the axis for one corner, and use it directly for the other
+                const Vec3 bottomCapCorner = bottomCapCenter - axisMask * Vec3(object.radius);
+                const Vec3 topCapOppositeCorner = topCapCenter + axisMask * Vec3(object.radius);
+
+                min = bottomCapCorner;
+                max = topCapOppositeCorner;
+            }else{
+                static_assert(false, "Unexpected object type");
+            }
+        }, object.variant);
+        assert(min.x <= max.x && min.y <= max.y && min.z <= max.z && "Internal error: invalid bounding box constructed");
+    }
+
+    Vec3 center() const { 
+        return (min + max) * 0.5f; 
+    }
+
+    Vec3 extent() const { 
+        return max - min; 
+    }
+
+    BoundingBox merge(const BoundingBox& other) const {
+        return BoundingBox(
+            min.min(other.min),
+            max.max(other.max)
+        );
+    }
+
+    bool contains(const Vec3& point) const {
+        return point.x >= min.x && point.x <= max.x &&
+               point.y >= min.y && point.y <= max.y &&
+               point.z >= min.z && point.z <= max.z;
+    }
+
+    float intersection_distance(const Ray& ray) const {
+    Vec3 invDir = Vec3(1.0f) / ray.direction;
+    
+    Vec3 t0 = (min - ray.origin) * invDir;
+    Vec3 t1 = (max - ray.origin) * invDir;
+    
+    Vec3 tmin = t0.min(t1);
+    Vec3 tmax = t0.max(t1);
+    
+    float tenter = std::max(std::max(tmin.x, tmin.y), tmin.z);
+    float texit = std::min(std::min(tmax.x, tmax.y), tmax.z);
+    
+    return tenter <= texit && texit >= 0 ? tenter : std::numeric_limits<float>::max();
+}
+
+    bool intersects(const Ray& ray) const {
+        Vec3 invDir = Vec3(1.0f) / ray.direction;
+        
+        Vec3 t0 = (min - ray.origin) * invDir;
+        Vec3 t1 = (max - ray.origin) * invDir;
+        
+        Vec3 tmin = t0.min(t1);
+        Vec3 tmax = t0.max(t1);
+        
+        float_t tenter = std::max(std::max(tmin.x, tmin.y), tmin.z);
+        float_t texit = std::min(std::min(tmax.x, tmax.y), tmax.z);
+        
+        return tenter <= texit && texit >= 0;
+    }
+
+    bool overlaps(const BoundingBox& other) const {
+        return min.x <= other.max.x && max.x >= other.min.x &&
+               min.y <= other.max.y && max.y >= other.min.y &&
+               min.z <= other.max.z && max.z >= other.min.z;
+    }
+
+    float_t surface_area() const {
+        Vec3 d = extent();
+        return 2.0f * (d.x * d.y + d.y * d.z + d.z * d.x);
+    }
+};
+
+struct ObjectRange{
+    /// left-inclusive, right-exclusive
+    std::pair<size_t, size_t> objectRange;
+
+    // allow implicit conversion
+    ObjectRange(std::pair<size_t, size_t> objectRange)
+        : objectRange(objectRange){ }
+
+    ObjectRange(size_t first, size_t last)
+        : objectRange(std::make_pair(first, last)){ }
+
+    size_t size() const{
+        return objectRange.second - objectRange.first;
+    }
+
+    bool empty() const{
+        return objectRange.first == objectRange.second;
+    }
+
+    bool operator==(const ObjectRange& other) const{
+        return objectRange == other.objectRange;
+    }
+
+    size_t begin() const{
+        return objectRange.first;
+    }
+
+    size_t end() const{
+        return objectRange.second;
+    }
+
+    // implicit conversion to pair
+    operator std::pair<size_t, size_t>() const{
+        return objectRange;
+    }
+};
+
+/// bounding volume hierarchy
+struct BVHNode{
+    BoundingBox bounds;
+    std::unique_ptr<BVHNode> left, right;
+    /// range of objects in the scene object list that this node represents
+    ObjectRange objectRange;
+    // -> from this, it is clear that objects can only overlap "linearly", i.e. only if they are adjacent in the list
+
+    static constexpr size_t MAX_DEPTH = 16;
+    // TODO maybe remove in future, or make an option; not in use currently, because even though it reduces memory usage, it doesn't improve performance
+    //static constexpr size_t MIN_OBJECTS = 4;
+
+public:
+    /// REORDERS THE OBJECTS VECTOR
+    /// but does not store it anywhere, the objects explicitly live outside the BVH
+    BVHNode(ObjectRange objectRangeP, std::vector<SceneObject>& objects, uint32_t depth = 0) 
+        : objectRange(std::move(objectRangeP))
+    {
+        assert(objectRange.begin() <= objectRange.end() && "Invalid objectRange");
+        assert(objectRange.end() <= objects.size() && "objectRange exceeds object vector");
+
+        bounds = boundsFromObjectRange(objectRange, objects);
+        
+        if (depth >= MAX_DEPTH)
+            return;
+
+        // Find the axis with greatest extent
+        Vec3 extent = bounds.extent();
+        int splitAxis = 0;
+        if (extent.y > extent.x) splitAxis = 1;
+        if (extent.z > extent[splitAxis]) splitAxis = 2;
+
+        auto begin = objects.begin() + objectRange.begin();
+        auto end = objects.begin() + objectRange.end();
+        std::nth_element(begin, begin + (end - begin)/2, end,
+            [splitAxis](const SceneObject& a, const SceneObject& b) {
+                return computeCentroid(a)[splitAxis] < computeCentroid(b)[splitAxis];
+            }
+        );
+        size_t midIndex = objectRange.begin() + (objectRange.end() - objectRange.begin()) / 2;
+        
+        if (midIndex > objectRange.begin() && midIndex < objectRange.end()) {
+            left = std::make_unique<BVHNode>(ObjectRange(objectRange.begin(), midIndex), objects, depth + 1);
+            right = std::make_unique<BVHNode>(ObjectRange(midIndex, objectRange.end()), objects, depth + 1);
+        }
+    }
+
+    std::optional<Intersection> intersect(const Ray& ray, const std::vector<SceneObject>& objects) const {
+        if (!bounds.intersects(ray))
+            return std::nullopt;
+
+        if (isLeaf()) {
+            auto closestIntersection = std::optional<Intersection>();
+
+            for (auto i = objectRange.begin(); i < objectRange.end(); ++i)
+                if (auto intersection = objects[i].intersect(ray))
+                    if(!closestIntersection.has_value() || intersection->distance() < closestIntersection->distance())
+                        closestIntersection = *intersection;
+
+            return closestIntersection;
+        }
+
+        // here, we're just checking both boxes
+        // TODO but we could check the least number of nodes by:
+        // a) checking the closer box first
+        // b) only checking the other box if the boxes overlap, or if the closer box has no intersection
+
+        auto leftIntersection = left->intersect(ray, objects);
+        auto rightIntersection = right->intersect(ray, objects);
+        if(leftIntersection.has_value() && rightIntersection.has_value())
+            return leftIntersection->distance() < rightIntersection->distance() ? leftIntersection : rightIntersection;
+        else if(leftIntersection.has_value())
+            // don't std::move this, to allow copy elision
+            return leftIntersection;
+        else
+            // if the right intersection is empty, this will also return nullopt
+            return rightIntersection;
+    }
+
+    bool isLeaf() const { 
+        return !left && !right; 
+    }
+
+    // === The following public methods are all for debugging purposes ===
+
+    void verifyBVH(const std::vector<SceneObject>& objects) const {
+#ifdef NDEBUG
+        std::println(stderr, "verifyBVH should only be called in debug mode");
+        std::abort();
+#endif
+        // Verify range validity
+        assert(objectRange.begin() <= objectRange.end() && "Invalid objectRange");
+        assert(objectRange.end() <= objects.size() && "objectRange exceeds vector size");
+
+        if (!isLeaf()) {
+            // Verify children exist
+            // (this is a bit stupid, because isLeaf would prob fail first, but just in case)
+            assert(left && right && "Non-leaf node missing children");
+
+            // Recursively verify children
+            left->verifyBVH(objects);
+            right->verifyBVH(objects);
+
+            // Verify child objectRanges overlap linearly, i.e.
+        }
+    }
+
+    void recursivelyCollectIntersectedBoxes(const Ray& ray, std::vector<std::pair<BoundingBox, int>>& boxes, int depth = 0) const {
+        if (bounds.intersects(ray)) {
+            boxes.push_back({bounds, depth});
+            
+            if (!isLeaf()) {
+                left->recursivelyCollectIntersectedBoxes(ray, boxes, depth + 1);
+                right->recursivelyCollectIntersectedBoxes(ray, boxes, depth + 1);
+            }
+        }
+    }
+
+    uint64_t numNodes() const {
+        if (isLeaf())
+            return 1;
+        return 1 + left->numNodes() + right->numNodes();
+    }
+
+private:
+    static Vec3 computeCentroid(const SceneObject& object) {
+        return std::visit([](const auto& obj) -> Vec3 {
+            using T = std::decay_t<decltype(obj)>;
+            if constexpr (std::is_same_v<T, Triangle>) {
+                return (obj.v0 + obj.v1 + obj.v2) / 3.0f;
+            } else if constexpr (std::is_same_v<T, Sphere>) {
+                return obj.center;
+            } else if constexpr (std::is_same_v<T, Cylinder>) {
+                return obj.center;
+            } else{
+                static_assert(false, "Unexpected object type");
+            }
+        }, object.variant);
+    }
+
+    static BoundingBox boundsFromObjectRange(ObjectRange range, 
+                                    const std::vector<SceneObject>& objects) {
+        BoundingBox bounds;
+        for (size_t i = range.begin(); i < range.end(); ++i) {
+            bounds = bounds.merge(BoundingBox(objects[i]));
+        }
+        return bounds;
     }
 };
 
@@ -643,6 +1063,8 @@ struct PointLight{
 enum class RenderMode{
     BINARY,
     PHONG,
+    DEBUG_BVH,
+    PATHTRACE,
 };
 
 struct Scene{
@@ -661,25 +1083,30 @@ struct Scene{
     //std::vector<Sphere> spheres;
     //std::vector<Cylinder> cylinders;
     //
-    std::vector<std::variant<Triangle, Sphere, Cylinder>> objects;
+    std::vector<SceneObject> objects;
 
     //Scene(uint32_t nBounces, RenderMode renderMode, std::unique_ptr<Camera> camera, Vec3 backgroundColor, std::vector<Triangle> triangles, std::vector<Sphere> spheres, std::vector<Cylinder> cylinders)
     //    : nBounces(nBounces), renderMode(renderMode), camera(std::move(camera)), backgroundColor(backgroundColor), triangles(triangles), spheres(spheres), cylinders(cylinders){ }
-    Scene(uint32_t nBounces, RenderMode renderMode, std::unique_ptr<Camera> camera, Vec3 backgroundColor, std::vector<PointLight> lights, std::vector<std::variant<Triangle, Sphere, Cylinder>> objects)
+    Scene(uint32_t nBounces, RenderMode renderMode, std::unique_ptr<Camera> camera, Vec3 backgroundColor, std::vector<PointLight> lights, std::vector<SceneObject> objects)
         : nBounces(nBounces), renderMode(renderMode), camera(std::move(camera)), backgroundColor(backgroundColor), lights(lights), objects(objects){ }
 };
 
 struct Renderer{
-
     Scene scene;
     PPMWriter writer;
     // ordered the same way a PPM file is, row by row
     // use a buffer instead of writing to the file immediately to be able to do it in parallel
     std::vector<Vec3> pixelBuffer;
 
+    BVHNode bvh;
+
     Renderer(Scene&& scene, std::string_view outputFilePath)
-        // TODO adjust writer
-        : scene(std::move(scene)), writer(outputFilePath, this->scene.camera->width, this->scene.camera->height), pixelBuffer(this->scene.camera->widthPixels*this->scene.camera->heightPixels, Vec3(0.)){}
+        : scene(std::move(scene)),
+          writer(outputFilePath, this->scene.camera->width, this->scene.camera->height),
+          pixelBuffer(this->scene.camera->widthPixels*this->scene.camera->heightPixels, Vec3(0.)),
+          // this reorders the objects in the scene to be able to build the BVH
+          bvh(BVHNode(ObjectRange(0, this->scene.objects.size()), this->scene.objects))
+    {}
 
     void bufferSpecificPixel(Vec2 pixel, Vec3 color){
         assert(pixel.x >= 0 && pixel.x < scene.camera->width && pixel.y >= 0 && pixel.y < scene.camera->height && "Pixel out of range");
@@ -690,24 +1117,24 @@ struct Renderer{
 
     /// shades a single intersection point
     /// outputs an un-tonemapped color, not for immediate display
-    Vec3 blinnPhongShading(const Intersection& intersectionToShade, uint32_t bounces = 1, float currentIOR = 1.0f) {
+    Vec3 blinnPhongShading(const Intersection& intersectionToShade, uint32_t bounces = 1, float_t currentIOR = 1.0f) {
         if (bounces > scene.nBounces)
             return Vec3(0.0f);
 
         // material properties
-        Vec3 diffuse = intersectionToShade.material.diffuseColorAtTextureCoords(intersectionToShade.textureCoords);
+        Vec3 diffuse = intersectionToShade.material->diffuseColorAtTextureCoords(intersectionToShade.textureCoords);
         float_t ambientIntensity = 0.25f;
         Vec3 ambient = diffuse * ambientIntensity;
-        Vec3 specular = intersectionToShade.material.specularColor;
-        float_t ks = intersectionToShade.material.ks;
-        float specularExponentShinyness = intersectionToShade.material.specularExponent;
+        Vec3 specular = intersectionToShade.material->specularColor;
+        float_t ks = intersectionToShade.material->ks;
+        float_t specularExponentShinyness = intersectionToShade.material->specularExponent;
 
         auto isInShadow = [&](const PointLight& light, const Vec3& L) -> bool {
             Vec3 shadowRayOrigin = intersectionToShade.point + L * (100 * epsilon);
             Ray shadowRay(shadowRayOrigin, L);
 
             if (auto shadowIntersection = traceRayToClosestSceneIntersection(shadowRay)) {
-                return (shadowIntersection->point - intersectionToShade.point).length() < (light.position - intersectionToShade.point).length();
+                return (shadowIntersection->point - intersectionToShade.point).length() < (light.position - intersectionToShade.point).length() - 100 * epsilon;
             }
             return false;
         };
@@ -721,9 +1148,9 @@ struct Renderer{
                 if(isInShadow(light, L))
                     continue;
 
-                Vec3 V = -intersectionToShade.incomingRay.direction.normalized();
+                Vec3 V = -intersectionToShade.incomingRay->direction.normalized();
                 Vec3 H = (L + V).normalized();
-                float spec = std::pow(std::max(intersectionToShade.surfaceNormal.dot(H), 0.0f), 
+                float_t spec = std::pow(std::max(intersectionToShade.surfaceNormal.dot(H), 0.0f), 
                         specularExponentShinyness);
                 specularSum += specular * spec * light.intensityPerColor * ks;
             }
@@ -731,26 +1158,27 @@ struct Renderer{
         };
 
         // Handle transparent (refractive) materials differently
-        if (intersectionToShade.material.refractiveIndex.has_value()) {
+        if (intersectionToShade.material->refractiveIndex.has_value()) {
             // make sure to still have specular highlights on transparent objects
             // these would be weighted by the objects transmissiveness, but as that doesnt exist, just add them for now
             Vec3 finalColor = calculateSpecularHighlights();
-            float materialIOR = *intersectionToShade.material.refractiveIndex;
+            float_t materialIOR = *intersectionToShade.material->refractiveIndex;
 
-            bool entering = intersectionToShade.incomingRay.direction.dot(intersectionToShade.surfaceNormal) < 0;
+            bool entering = intersectionToShade.incomingRay->direction.dot(intersectionToShade.surfaceNormal) < 0;
             Vec3 normal = entering ? intersectionToShade.surfaceNormal : -intersectionToShade.surfaceNormal;
-            float etaRatio = entering ? currentIOR / materialIOR : materialIOR / currentIOR;
+            float_t etaRatio = entering ? currentIOR / materialIOR : materialIOR / currentIOR;
 
-            float cosTheta_i = -normal.dot(intersectionToShade.incomingRay.direction);
-            float sinTheta_t_squared = etaRatio * etaRatio * (1.0f - cosTheta_i * cosTheta_i);
+            float_t cosTheta_i = -normal.dot(intersectionToShade.incomingRay->direction);
+            float_t sinTheta_t_squared = etaRatio * etaRatio * (1.0f - cosTheta_i * cosTheta_i);
 
             if (sinTheta_t_squared <= 1.0f) {
-                float cosTheta_t = std::sqrt(1.0f - sinTheta_t_squared);
-                Vec3 refractedDir = etaRatio * intersectionToShade.incomingRay.direction + 
+                float_t cosTheta_t = std::sqrt(1.0f - sinTheta_t_squared);
+                Vec3 refractedDir = etaRatio * intersectionToShade.incomingRay->direction + 
                     (etaRatio * cosTheta_i - cosTheta_t) * normal;
 
                 Ray refractedRay(intersectionToShade.point + refractedDir * (10 * epsilon), refractedDir);
-                float nextIOR = entering ? materialIOR : 1.0f;
+                // TODO refracting exiting being air doesnt really work I think, it should somehow be dependent on whether the intersection is inside the current intersected object or outside
+                float_t nextIOR = entering ? materialIOR : 1.0f;
 
                 Vec3 refractedColor = scene.backgroundColor;
                 if (auto refractedIntersection = traceRayToClosestSceneIntersection(refractedRay)) {
@@ -777,14 +1205,14 @@ struct Renderer{
         // Ambient and diffuse
         color += ambient;  // ambient
 
-        float_t kd = intersectionToShade.material.kd;
+        float_t kd = intersectionToShade.material->kd;
         for(const auto& light: scene.lights) {
             Vec3 L = (light.position - intersectionToShade.point).normalized();
             if(isInShadow(light, L))
                 continue;
 
             Vec3 N = intersectionToShade.surfaceNormal;
-            float diff = std::max(N.dot(L), 0.0f);
+            float_t diff = std::max(N.dot(L), 0.0f);
             color += diffuse * diff * light.intensityPerColor * kd;  // diffuse
         }
 
@@ -793,18 +1221,18 @@ struct Renderer{
 
         // Handle reflection if material is reflective
         // TODO could do fresnel here and for refractivity
-        if(intersectionToShade.material.reflectivity.has_value()) {
+        if(intersectionToShade.material->reflectivity.has_value()) {
             Vec3 reflectedColor = scene.backgroundColor;
-            Vec3 reflectionDir = intersectionToShade.incomingRay.direction - 
+            Vec3 reflectionDir = intersectionToShade.incomingRay->direction - 
                 intersectionToShade.surfaceNormal * 2 * 
-                (intersectionToShade.incomingRay.direction.dot(intersectionToShade.surfaceNormal));
+                (intersectionToShade.incomingRay->direction.dot(intersectionToShade.surfaceNormal));
             Ray reflectionRay(intersectionToShade.point + reflectionDir * (10 * epsilon), reflectionDir);
 
             if (auto reflectionIntersection = traceRayToClosestSceneIntersection(reflectionRay)) {
                 reflectedColor = blinnPhongShading(*reflectionIntersection, bounces + 1, currentIOR);
             }
 
-            color = color.lerp(reflectedColor, *intersectionToShade.material.reflectivity);
+            color = color.lerp(reflectedColor, *intersectionToShade.material->reflectivity);
         }
 
         return color;
@@ -821,45 +1249,54 @@ struct Renderer{
         return toneMapped;
     }
 
-
+    template<bool useBVH = true>
     std::optional<Intersection> traceRayToClosestSceneIntersection(const Ray& ray){
-        auto closestIntersection = std::optional<Intersection>();
-        for(auto& genericObject: scene.objects){
-            std::visit([&](auto&& object){
+        if constexpr(useBVH){
+            return bvh.intersect(ray, scene.objects);
+        }else{
+            auto closestIntersection = std::optional<Intersection>();
+            for(auto& object: scene.objects)
                 if(auto intersection = object.intersect(ray))
                     if(!closestIntersection.has_value() || intersection->distance() < closestIntersection->distance())
                         closestIntersection = *intersection;
-            }, genericObject);
+
+            return closestIntersection;
         }
-        return closestIntersection;
     }
 
     template<RenderMode mode>
     void render(){
-// cant try gpu openacc because nvcc doesnt support c++23 :(
-// openacc might not work at all with gcc here, is basically the same time as serial
-//#pragma acc parallel loop
+        std::println(stderr, "BVH num nodes: {}", bvh.numNodes());
+        std::println(stderr, "num objects: {}", bvh.objectRange.size());
+
+        if constexpr(mode == RenderMode::DEBUG_BVH){
+            renderDebugBVHToBuffer();
+        }else if constexpr(mode == RenderMode::PATHTRACE){
+            renderPathtraceToBuffer();
+        }else{
+            // cant try gpu openacc because nvcc doesnt support c++23 :(
+            // openacc might not work at all with gcc here, is basically the same time as serial
+            //#pragma acc parallel loop
 #pragma omp parallel for
-        for(uint32_t y = 0; y < scene.camera->heightPixels; y++){
-            for(uint32_t x = 0; x < scene.camera->widthPixels; x++){
-                Ray cameraRay = scene.camera->generateRay(Vec2(x, y));
-                //std::println("Camera ray direction: ({},{},{}) from ({},{},{})", cameraRay.direction.x, cameraRay.direction.y, cameraRay.direction.z, cameraRay.origin.x, cameraRay.origin.y, cameraRay.origin.z);
-                // TODO other objects etc
-                // TODO get closest intersection, not just test one
-                auto closestIntersection = traceRayToClosestSceneIntersection(cameraRay);
+            for(uint32_t y = 0; y < scene.camera->heightPixels; y++){
+                for(uint32_t x = 0; x < scene.camera->widthPixels; x++){
+                    Ray cameraRay = scene.camera->generateRay(Vec2(x, y));
 
-                Vec3 pixelColor = linearToneMapping(scene.backgroundColor);
-                if(closestIntersection.has_value()){
-                    if constexpr (mode == RenderMode::BINARY){
-                        pixelColor = Vec3(1.0);
-                    }else if constexpr (mode == RenderMode::PHONG){
-                        pixelColor = shadeIntersection(*closestIntersection);
-                    }else{
-                        static_assert(false, "Invalid render mode");
+                    auto closestIntersection = traceRayToClosestSceneIntersection(cameraRay);
+
+                    Vec3 pixelColor = linearToneMapping(scene.backgroundColor);
+                    if(closestIntersection.has_value()){
+                        if constexpr (mode == RenderMode::BINARY){
+                            pixelColor = Vec3(1.0);
+                        }else if constexpr (mode == RenderMode::PHONG){
+                            pixelColor = shadeIntersection(*closestIntersection);
+                        }else{
+                            static_assert(mode == RenderMode::DEBUG_BVH, "Invalid render mode");
+                        }
                     }
-                }
 
-                bufferSpecificPixel(Vec2(x, y), pixelColor);
+                    bufferSpecificPixel(Vec2(x, y), pixelColor);
+                }
             }
         }
 
@@ -869,6 +1306,140 @@ struct Renderer{
             writer.writePixel(pixel);
     }
 
+    void renderDebugBVHToBuffer() {
+        // serially, so we dont have to use atomic accesses on the max intensity
+        float maxIntensity = 0.0f;
+        for(uint32_t y = 0; y < scene.camera->heightPixels; y++){
+            for(uint32_t x = 0; x < scene.camera->widthPixels; x++){
+                Ray cameraRay = scene.camera->generateRay(Vec2(x, y));
 
+                std::vector<std::pair<BoundingBox, int>> intersected_boxes;
+                bvh.recursivelyCollectIntersectedBoxes(cameraRay, intersected_boxes);
+
+                // just write the size to the buffer for now, and keep track of the max
+                float intensity = intersected_boxes.size();
+                maxIntensity = std::max(maxIntensity, intensity);
+                bufferSpecificPixel(Vec2(x, y), Vec3(intensity, intensity, intensity));
+            }
+        }
+
+        // then go through all them again and normalize them
+        for(auto& pixel: pixelBuffer)
+            pixel = pixel / maxIntensity;
+    }
+
+    // Generate a uniformly distributed random float in [0, 1)
+    float randomFloat() {
+        static std::random_device rd;
+        static std::mt19937 gen(rd());
+        static std::uniform_real_distribution<float> dis(0.0f, 1.0f);
+        return dis(gen);
+    }
+
+    enum ImportanceSamplingTechnique{
+        UNIFORM,
+        COSINE_WEIGHTED_HEMISPHERE,
+    };
+
+    template<ImportanceSamplingTechnique technique>
+    Vec3 sampleHemisphere(const Vec3& normal){
+        if constexpr (technique == COSINE_WEIGHTED_HEMISPHERE){
+            // TODO this isnt tested at all yet
+
+            // cosine weighted hemisphere sampling, to eliminate the dot product from the rendering equation
+            // basically the approximation of the integral already divides by cos(theta), so the multiplying by theta
+            // in the normal rendering equation gets cancelled out.
+            // To get the correct value of dividing by the PDF (cos(theta)/pi), we have to multiply by pi again
+
+            // Generate two random numbers for disk sampling
+            float r = sqrt(randomFloat());
+            float theta = 2.0f * M_PI * randomFloat();
+
+            // Convert uniform disk samples to hemisphere samples
+            float x = r * cos(theta);
+            float y = r * sin(theta);
+
+            // Project up to hemisphere
+            float z = sqrt(1.0f - x*x - y*y);
+
+            // Create a coordinate system from the normal
+            // TODO that z check is strange
+            Vec3 up = (std::abs(normal.z) < (1 - 100 * epsilon)) ? Vec3(0, 0, 1) : Vec3(1, 0, 0);
+            Vec3 tangent = up.cross(normal).normalized();
+            Vec3 bitangent = normal.cross(tangent);
+
+            // Transform the local hemisphere direction to world space
+            // TODO hmmm, this will always give positive results though, right?
+            return (tangent * x + bitangent * y + normal * z).normalized();
+        }else if constexpr (technique == UNIFORM){
+            // pick any point, if it's not on the hemisphere, invert it
+            Vec3 firstTry = Vec3(randomFloat(), randomFloat(), randomFloat());
+            
+            if(firstTry.dot(normal) < 0)
+                return -(firstTry).normalized();
+
+            return firstTry.normalized();
+        } else {
+            static_assert(false, "Invalid importance sampling technique");
+        }
+    }
+
+    // TODO the pathtracing stuff here doesnt really work yet
+
+    Vec3 shadePathtraced(const Intersection& intersection, uint32_t bounces = 1){
+        Vec3 color = intersection.material->emissionColor.value_or(Vec3(0.0f));
+
+        // TODO could add a BRDF here, but for now, just add the color
+        auto diffuse = intersection.material->diffuseColorAtTextureCoords(intersection.textureCoords) * intersection.material->kd;
+
+        if(bounces > scene.nBounces)
+            return color;
+
+        // add diffuse incoming light from all directions
+        constexpr uint32_t nSamples = 4;
+        Vec3 sampleContributions(0.0f);
+        for(uint32_t i = 0; i < nSamples; i++){
+            Vec3 hemisphereSample = sampleHemisphere<UNIFORM>(intersection.surfaceNormal);
+            Ray incomingRay(intersection.point + hemisphereSample * (10 * epsilon), hemisphereSample);
+
+            Vec3 incomingColor = scene.backgroundColor;
+            if(auto incomingIntersection = traceRayToClosestSceneIntersection(incomingRay)){
+                incomingColor = shadePathtraced(*incomingIntersection, bounces + 1);
+                incomingColor = incomingColor * diffuse;
+            }
+            // weight by the cosine of the angle between the normal and the incoming ray
+            sampleContributions += 2 * incomingColor * std::max(0.0f, intersection.surfaceNormal.dot(hemisphereSample));
+        }
+        color += sampleContributions / nSamples;
+        return color;
+    }
+
+    void renderPathtraceToBuffer(){
+#pragma omp parallel for
+        for(uint32_t y = 0; y < scene.camera->heightPixels; y++){
+            for(uint32_t x = 0; x < scene.camera->widthPixels; x++){
+                constexpr uint32_t samplesPerPixel = 4;
+
+                Vec2 pixelOrigin = Vec2(x, y);
+                Vec3 colorSum = Vec3(0.);
+                for(uint32_t sample = 0; sample < samplesPerPixel; sample++){
+                    // permute ray randomly/evenly (TODO importance sampling later)
+                    
+                    Vec2 permutedPixel = pixelOrigin + Vec2(randomFloat(), randomFloat()).normalized()/2.;
+                    Ray cameraRay = scene.camera->generateRay(permutedPixel);
+
+
+                    if(auto intersection = traceRayToClosestSceneIntersection(cameraRay)){
+                        colorSum += shadePathtraced(*intersection);
+                    }else{
+                        // background color
+                        colorSum += scene.backgroundColor;
+                    }
+                }
+
+                bufferSpecificPixel(Vec2(x, y), linearToneMapping(colorSum / samplesPerPixel));
+            }
+        }
+    }
 
 };

@@ -181,6 +181,8 @@ Scene jsonFileToScene(std::string_view path){
         renderMode = RenderMode::PHONG;
     else if(renderModeS == "binary")
         renderMode = RenderMode::BINARY;
+    else if(renderModeS == "pathtrace")
+        renderMode = RenderMode::PATHTRACE;
     else
         fail("Invalid rendermode");
 
@@ -233,6 +235,7 @@ Scene jsonFileToScene(std::string_view path){
         if(!getOrFail(j, "isrefractive"))
             refractiveIndex = std::nullopt;
 
+
         // textures
         std::optional<std::shared_ptr<Texture>> texture = std::nullopt;
         if(j.contains("texture")){
@@ -251,12 +254,13 @@ Scene jsonFileToScene(std::string_view path){
             (uint64_t) getOrFail(j, "specularexponent"),
             reflectivity,
             refractiveIndex,
+            getOrElse(j, "emissioncolor", std::optional<json>()).and_then([&jsonToVec3](auto j){return std::optional(jsonToVec3(j));}),
             texture
         );
     };
 
     // objects
-    std::vector<std::variant<Triangle, Sphere, Cylinder>> sceneObjects;
+    std::vector<SceneObject> sceneObjects;
     sceneObjects.reserve(sceneObjectsJ.size());
 
     for(auto& sceneObjectJ:sceneObjectsJ){
@@ -307,6 +311,9 @@ Scene jsonFileToScene(std::string_view path){
 }
 
 int main(int argc, char *argv[]) {
+#ifndef NDEBUG
+    std::println("Running in debug mode, this will be slow");
+#endif
     if(argc != 2)
         printHelpExit(argv[0], EXIT_FAILURE);
 
@@ -322,18 +329,29 @@ int main(int argc, char *argv[]) {
 
     MEASURE_TIME_START(wallTime);
 
+    MEASURE_TIME_START(jsonTime);
     Renderer renderer(jsonFileToScene(argv[1]), "out.ppm");
+    MEASURE_TIME_END(jsonTime);
+
+    MEASURE_TIME_START(renderTime);
+
     // "convert" render mode to constexpr
     if(renderer.scene.renderMode == RenderMode::BINARY)
         renderer.render<RenderMode::BINARY>();
     else if(renderer.scene.renderMode == RenderMode::PHONG)
         renderer.render<RenderMode::PHONG>();
-    else
+    else if(renderer.scene.renderMode == RenderMode::PATHTRACE)
+        renderer.render<RenderMode::PATHTRACE>();
+    else{
+        std::println(stderr, "Render mode not supported yet");
         std::exit(EXIT_FAILURE);
+    }
+
+    MEASURE_TIME_END(renderTime);
 
     MEASURE_TIME_END(wallTime);
 
-    std::println("Rendered in {} seconds", MEASURED_TIME_AS_SECONDS(wallTime, 1));
+    std::println("Timing:\n- Wall: {}\n- Json to Scene: {}\n- Render: {}", MEASURED_TIME_AS_SECONDS(wallTime, 1), MEASURED_TIME_AS_SECONDS(jsonTime, 1), MEASURED_TIME_AS_SECONDS(renderTime, 1));
 
     return EXIT_SUCCESS;
 }

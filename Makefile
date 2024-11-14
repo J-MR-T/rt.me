@@ -11,11 +11,14 @@ SOURCES=$(wildcard src/*.cpp)
 DEPS=$(wildcard src/*.h)
 OBJECTS=$(SOURCES:src/%.cpp=build/%.o)
 
-.PHONY: all debug clean
+.PHONY: release relWithDebInfo debug clean setup
 
-all: setup $(SOURCES)
+release: setup $(SOURCES)
 	# for some reason, export CXXFLAGS+=... doesn't work
 	$(MAKE) $(OUT) CXXFLAGS="$(CXXFLAGS) -DNDEBUG"
+
+relWithDebInfo: setup $(SOURCES)
+	$(MAKE) $(OUT) CXXFLAGS="$(CXXFLAGS) -g -DNDEBUG"
 
 debug: setup $(SOURCES)
 	$(MAKE) $(OUT) CXXFLAGS="$(CXXFLAGS) $(DEBUGFLAGS)"
