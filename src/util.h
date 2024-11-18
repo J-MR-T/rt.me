@@ -3,13 +3,13 @@
 #include <cmath>
 #include <memory>
 #include <random>
+#include <ranges>
 #include <vector>
 #include <optional>
 #include <cstdint>
 #include <string>
 #include <fstream>
 #include <print>
-#include <atomic>
 
 // single precision for now
 using float_t = float;
@@ -186,6 +186,9 @@ struct PPMWriter{
 private:
     std::ofstream file;
 
+    std::ofstream::pos_type pixelDataStart;
+
+
 public:
     std::string filePath;
     uint32_t width, height;
@@ -197,15 +200,14 @@ public:
             std::perror("Couldn't open file for writing");
             std::exit(EXIT_FAILURE);
         }
+
         // we're writing binary ppm, i.e. P6
 
         // write header
         file << "P6\n" << width << " " << height << "\n255\n";
-        // the rest is the pixel data, which we'll write later
-    }
 
-    ~PPMWriter(){
-        file.close();
+        // the rest is the pixel data, which we'll write later
+        this->pixelDataStart = file.tellp();
     }
 
     /// write a single pixel in binary format, pixels are iterated over row by row
@@ -216,11 +218,17 @@ public:
     }
 
     void writePixel(Vec3 color){
+        assert(color == color.clamp(0,1) && "Color must be in the range [0,1]");
         writePixel(
             static_cast<uint8_t>(color.x * 255),
             static_cast<uint8_t>(color.y * 255),
             static_cast<uint8_t>(color.z * 255)
         );
+    }
+
+    void rewind(){
+        file.flush();
+        file.seekp(pixelDataStart);
     }
 };
 
@@ -688,10 +696,10 @@ struct Triangle {
 
             // Ensure the normal points against the ray's direction,
             // we want to make sure that backfaces look like frontfaces
-            // TODO I think this makes stuff righter, in particular shadow calculations for flipped normals, but it also looks weird in some cases
-            //if (normal.dot(ray.direction) > 0) {
-                //normal = -normal;
-            //}
+            // TODO I think this makes stuff righter, in particular shadow calculations for flipped normals
+            if (normal.dot(ray.direction) > 0) {
+                normal = -normal;
+            }
 
             // interpolate texture coordinates
             // calculate barycentric coordinate `w`
@@ -1064,7 +1072,10 @@ enum class RenderMode{
     BINARY,
     PHONG,
     DEBUG_BVH,
+    DEBUG_NORMALS,
     PATHTRACE,
+    // continue rendering after rendering the first frame, and average the results
+    PATHTRACE_INCREMENTAL,
 };
 
 struct Scene{
@@ -1085,10 +1096,12 @@ struct Scene{
     //
     std::vector<SceneObject> objects;
 
+    uint32_t pathtracingSamplesPerPixel;
+
     //Scene(uint32_t nBounces, RenderMode renderMode, std::unique_ptr<Camera> camera, Vec3 backgroundColor, std::vector<Triangle> triangles, std::vector<Sphere> spheres, std::vector<Cylinder> cylinders)
     //    : nBounces(nBounces), renderMode(renderMode), camera(std::move(camera)), backgroundColor(backgroundColor), triangles(triangles), spheres(spheres), cylinders(cylinders){ }
-    Scene(uint32_t nBounces, RenderMode renderMode, std::unique_ptr<Camera> camera, Vec3 backgroundColor, std::vector<PointLight> lights, std::vector<SceneObject> objects)
-        : nBounces(nBounces), renderMode(renderMode), camera(std::move(camera)), backgroundColor(backgroundColor), lights(lights), objects(objects){ }
+    Scene(uint32_t nBounces, RenderMode renderMode, std::unique_ptr<Camera> camera, Vec3 backgroundColor, std::vector<PointLight> lights, std::vector<SceneObject> objects, uint32_t pathtracingSamplesPerPixel)
+        : nBounces(nBounces), renderMode(renderMode), camera(std::move(camera)), backgroundColor(backgroundColor), lights(std::move(lights)), objects(std::move(objects)), pathtracingSamplesPerPixel(pathtracingSamplesPerPixel){ }
 };
 
 struct Renderer{
@@ -1096,23 +1109,33 @@ struct Renderer{
     PPMWriter writer;
     // ordered the same way a PPM file is, row by row
     // use a buffer instead of writing to the file immediately to be able to do it in parallel
-    std::vector<Vec3> pixelBuffer;
+    std::vector<Vec3> hdrPixelBuffer;
 
     BVHNode bvh;
 
+
     Renderer(Scene&& scene, std::string_view outputFilePath)
         : scene(std::move(scene)),
-          writer(outputFilePath, this->scene.camera->width, this->scene.camera->height),
-          pixelBuffer(this->scene.camera->widthPixels*this->scene.camera->heightPixels, Vec3(0.)),
+          writer(outputFilePath, this->scene.camera->widthPixels, this->scene.camera->heightPixels),
+          hdrPixelBuffer(this->scene.camera->widthPixels*this->scene.camera->heightPixels, Vec3(0.)),
           // this reorders the objects in the scene to be able to build the BVH
           bvh(BVHNode(ObjectRange(0, this->scene.objects.size()), this->scene.objects))
     {}
 
     void bufferSpecificPixel(Vec2 pixel, Vec3 color){
         assert(pixel.x >= 0 && pixel.x < scene.camera->width && pixel.y >= 0 && pixel.y < scene.camera->height && "Pixel out of range");
-        assert(color == color.clamp(0.0f, 1.0f) && "Color must be clamped to [0,1]");
-        assert(scene.camera->width * pixel.y + pixel.x < pixelBuffer.size() && "Pixel out of range");
-        pixelBuffer[pixel.y * scene.camera->width + pixel.x] = color;
+        assert(scene.camera->width * pixel.y + pixel.x < hdrPixelBuffer.size() && "Pixel out of range");
+        hdrPixelBuffer[pixel.y * scene.camera->width + pixel.x] = color;
+    }
+
+    void writeBufferToFile(){
+        writer.rewind();
+        // write buffer to file
+        assert(hdrPixelBuffer.size() == scene.camera->widthPixels * scene.camera->heightPixels && "Pixel buffer size mismatch");
+        for(auto& hdrPixel: hdrPixelBuffer){
+            auto ldrPixel = hdrPixel.clamp(0.0f, 1.0f);
+            writer.writePixel(ldrPixel);
+        }
     }
 
     /// shades a single intersection point
@@ -1238,8 +1261,13 @@ struct Renderer{
         return color;
     }
 
+    /// does *not* clamp the color, this is done in writing the pixel to the buffer
     Vec3 linearToneMapping(Vec3 color){
-        return (color*scene.camera->exposure * 15.).clamp(0.0f, 1.0f);
+        return color*scene.camera->exposure * 15.;
+    }
+
+    Vec3 gammaCorrect(Vec3 color){
+        return Vec3(std::pow(color.x, 1.0f/2.2f), std::pow(color.y, 1.0f/2.2f), std::pow(color.z, 1.0f/2.2f));
     }
 
     Vec3 shadeIntersection(const Intersection& intersectionToShade){
@@ -1269,10 +1297,36 @@ struct Renderer{
         std::println(stderr, "BVH num nodes: {}", bvh.numNodes());
         std::println(stderr, "num objects: {}", bvh.objectRange.size());
 
-        if constexpr(mode == RenderMode::DEBUG_BVH){
+        if constexpr(mode == RenderMode::DEBUG_BVH)
             renderDebugBVHToBuffer();
-        }else if constexpr(mode == RenderMode::PATHTRACE){
+        else if constexpr(mode == RenderMode::DEBUG_NORMALS)
+            renderDebugNormalsToBuffer();
+        else if constexpr(mode == RenderMode::PATHTRACE)
             renderPathtraceToBuffer();
+        else if constexpr(mode == RenderMode::PATHTRACE_INCREMENTAL){
+            // until user closes stdin (Ctrl+D)
+            std::println(stderr, "Rendering incrementally. Press Ctrl+D to stop after next render");
+
+            renderPathtraceToBuffer();
+            writeBufferToFile();
+
+            uint32_t samplesPerPixelSoFar = scene.pathtracingSamplesPerPixel;
+            std::println(stderr, "First frame rendered, {} samples per pixel so far", samplesPerPixelSoFar);
+
+            std::vector<Vec3> previousBuffer = hdrPixelBuffer;
+            while (!std::feof(stdin)){
+                renderPathtraceToBuffer();
+                const uint32_t samplePixelsNow = scene.pathtracingSamplesPerPixel + samplesPerPixelSoFar;
+                // average the results
+                for(auto [pixel, previousPixel]: std::ranges::views::zip(hdrPixelBuffer, previousBuffer)){
+                    pixel = scene.pathtracingSamplesPerPixel*pixel/samplePixelsNow + samplesPerPixelSoFar*previousPixel/samplePixelsNow;
+                }
+                writeBufferToFile();
+                previousBuffer = hdrPixelBuffer;
+
+                samplesPerPixelSoFar = samplePixelsNow;
+                std::println(stderr, "Frame rendered, {} samples per pixel so far", samplesPerPixelSoFar);
+            } 
         }else{
             // cant try gpu openacc because nvcc doesnt support c++23 :(
             // openacc might not work at all with gcc here, is basically the same time as serial
@@ -1291,19 +1345,15 @@ struct Renderer{
                         }else if constexpr (mode == RenderMode::PHONG){
                             pixelColor = shadeIntersection(*closestIntersection);
                         }else{
-                            static_assert(mode == RenderMode::DEBUG_BVH, "Invalid render mode");
+                            static_assert(false, "Invalid render mode");
                         }
                     }
 
-                    bufferSpecificPixel(Vec2(x, y), pixelColor);
+                    bufferSpecificPixel(Vec2(x, y), linearToneMapping(pixelColor));
                 }
             }
         }
-
-        // write buffer to file
-        assert(pixelBuffer.size() == scene.camera->widthPixels * scene.camera->heightPixels && "Pixel buffer size mismatch");
-        for(auto& pixel: pixelBuffer)
-            writer.writePixel(pixel);
+        writeBufferToFile();
     }
 
     void renderDebugBVHToBuffer() {
@@ -1324,12 +1374,26 @@ struct Renderer{
         }
 
         // then go through all them again and normalize them
-        for(auto& pixel: pixelBuffer)
+        for(auto& pixel: hdrPixelBuffer)
             pixel = pixel / maxIntensity;
     }
 
-    // Generate a uniformly distributed random float in [0, 1)
+    void renderDebugNormalsToBuffer() {
+        for(uint32_t y = 0; y < scene.camera->heightPixels; y++){
+            for(uint32_t x = 0; x < scene.camera->widthPixels; x++){
+                Ray cameraRay = scene.camera->generateRay(Vec2(x, y));
+
+                if(auto closestIntersection = traceRayToClosestSceneIntersection(cameraRay)){
+                    auto normalZeroOne = closestIntersection->surfaceNormal * 0.5f + Vec3(0.5f);
+                    bufferSpecificPixel(Vec2(x, y), normalZeroOne);
+                }
+            }
+        }
+    }
+
+    /// generate a uniformly distributed random float in [0, 1)
     float randomFloat() {
+        // generated by chatgpt
         static std::random_device rd;
         static std::mt19937 gen(rd());
         static std::uniform_real_distribution<float> dis(0.0f, 1.0f);
@@ -1372,13 +1436,26 @@ struct Renderer{
             // TODO hmmm, this will always give positive results though, right?
             return (tangent * x + bitangent * y + normal * z).normalized();
         }else if constexpr (technique == UNIFORM){
-            // pick any point, if it's not on the hemisphere, invert it
-            Vec3 firstTry = Vec3(randomFloat(), randomFloat(), randomFloat());
-            
-            if(firstTry.dot(normal) < 0)
-                return -(firstTry).normalized();
+            float_t phi = 2.0 * M_PI * randomFloat();
+            float_t z = randomFloat();
+            float_t r = std::sqrt(1.0 - z*z);
 
-            return firstTry.normalized();
+            // Create basis vectors
+            Vec3 up = normal;
+            Vec3 right(1, 0, 0);
+            if (std::abs(up.y) < std::abs(up.x)) {
+                right = Vec3(0, 1, 0);
+            }
+
+            Vec3 tangent = up.cross(right);
+            Vec3 bitangent = up.cross(tangent);
+
+            Vec3 sample = tangent * (r * std::cos(phi)) + 
+                bitangent * (r * std::sin(phi)) + 
+                up * z;
+            assert(sample == sample.normalized() && "Sample must be on the unit hemisphere");
+
+            return sample;
         } else {
             static_assert(false, "Invalid importance sampling technique");
         }
@@ -1386,46 +1463,46 @@ struct Renderer{
 
     // TODO the pathtracing stuff here doesnt really work yet
 
+    template<ImportanceSamplingTechnique samplingTechnique = COSINE_WEIGHTED_HEMISPHERE>
     Vec3 shadePathtraced(const Intersection& intersection, uint32_t bounces = 1){
-        Vec3 color = intersection.material->emissionColor.value_or(Vec3(0.0f));
+        if(bounces > scene.nBounces)
+            return Vec3(scene.backgroundColor);
 
+        Vec3 emission = intersection.material->emissionColor.value_or(Vec3(0.0f));
+
+        // add diffuse incoming light from all directions
+        Vec3 hemisphereSample = sampleHemisphere<samplingTechnique>(intersection.surfaceNormal);
+
+        Ray incomingRay(intersection.point + hemisphereSample * (10 * epsilon), hemisphereSample);
+
+        Vec3 incomingColor = scene.backgroundColor;
+        if(auto incomingIntersection = traceRayToClosestSceneIntersection(incomingRay)){
+            incomingColor = shadePathtraced<samplingTechnique>(*incomingIntersection, bounces + 1);
+        }
+        // weight by the cosine of the angle between the normal and the incoming ray
+        
         // TODO could add a BRDF here, but for now, just add the color
         auto diffuse = intersection.material->diffuseColorAtTextureCoords(intersection.textureCoords) * intersection.material->kd;
 
-        if(bounces > scene.nBounces)
-            return color;
-
-        // add diffuse incoming light from all directions
-        constexpr uint32_t nSamples = 4;
-        Vec3 sampleContributions(0.0f);
-        for(uint32_t i = 0; i < nSamples; i++){
-            Vec3 hemisphereSample = sampleHemisphere<UNIFORM>(intersection.surfaceNormal);
-            Ray incomingRay(intersection.point + hemisphereSample * (10 * epsilon), hemisphereSample);
-
-            Vec3 incomingColor = scene.backgroundColor;
-            if(auto incomingIntersection = traceRayToClosestSceneIntersection(incomingRay)){
-                incomingColor = shadePathtraced(*incomingIntersection, bounces + 1);
-                incomingColor = incomingColor * diffuse;
-            }
-            // weight by the cosine of the angle between the normal and the incoming ray
-            sampleContributions += 2 * incomingColor * std::max(0.0f, intersection.surfaceNormal.dot(hemisphereSample));
+        if constexpr(samplingTechnique == COSINE_WEIGHTED_HEMISPHERE){
+            return emission + incomingColor * diffuse;
+        }else if(samplingTechnique == UNIFORM){
+            return emission + 2. * incomingColor * diffuse * intersection.surfaceNormal.dot(hemisphereSample);
         }
-        color += sampleContributions / nSamples;
-        return color;
     }
 
     void renderPathtraceToBuffer(){
 #pragma omp parallel for
         for(uint32_t y = 0; y < scene.camera->heightPixels; y++){
             for(uint32_t x = 0; x < scene.camera->widthPixels; x++){
-                constexpr uint32_t samplesPerPixel = 4;
-
                 Vec2 pixelOrigin = Vec2(x, y);
                 Vec3 colorSum = Vec3(0.);
-                for(uint32_t sample = 0; sample < samplesPerPixel; sample++){
+                for(uint32_t sample = 0; sample < scene.pathtracingSamplesPerPixel; sample++){
                     // permute ray randomly/evenly (TODO importance sampling later)
-                    
-                    Vec2 permutedPixel = pixelOrigin + Vec2(randomFloat(), randomFloat()).normalized()/2.;
+
+                    // jittered sampling
+                    Vec2 permutedPixel = pixelOrigin + Vec2(randomFloat(), randomFloat());
+
                     Ray cameraRay = scene.camera->generateRay(permutedPixel);
 
 
@@ -1437,7 +1514,7 @@ struct Renderer{
                     }
                 }
 
-                bufferSpecificPixel(Vec2(x, y), linearToneMapping(colorSum / samplesPerPixel));
+                bufferSpecificPixel(Vec2(x, y), linearToneMapping(gammaCorrect(colorSum / scene.pathtracingSamplesPerPixel)));
             }
         }
     }

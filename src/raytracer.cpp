@@ -175,16 +175,26 @@ Scene jsonFileToScene(std::string_view path){
     // shared pointers are a bit slow, and new/delete could be faster, but ownership is easier to track this way
     std::unordered_map<std::string, std::shared_ptr<Texture>> textures;
 
+    uint32_t pathtracingSamplesPerPixel = 0;
+
     // get render mode
     RenderMode renderMode;
     if(renderModeS == "phong")
         renderMode = RenderMode::PHONG;
     else if(renderModeS == "binary")
         renderMode = RenderMode::BINARY;
-    else if(renderModeS == "pathtrace")
+    else if(renderModeS == "debugbvh")
+        renderMode = RenderMode::DEBUG_BVH;
+    else if(renderModeS == "debugnormals")
+        renderMode = RenderMode::DEBUG_NORMALS;
+    else if(renderModeS == "pathtrace"){
         renderMode = RenderMode::PATHTRACE;
-    else
+        pathtracingSamplesPerPixel = getOrFail(root, "samplesperpixel");
+        if(getOrFail(root, "incremental"))
+            renderMode = RenderMode::PATHTRACE_INCREMENTAL;
+    } else
         fail("Invalid rendermode");
+
 
     // get camera
     std::string cameraType = getOrFail(cameraJ, "type");
@@ -307,7 +317,7 @@ Scene jsonFileToScene(std::string_view path){
             fail("Invalid shape");
         }
     }
-    return Scene(nBounces, renderMode, std::make_unique<PinholePerspectiveCamera>(camera), backgroundColor, lights, sceneObjects);
+    return Scene(nBounces, renderMode, std::make_unique<PinholePerspectiveCamera>(camera), backgroundColor, lights, sceneObjects, pathtracingSamplesPerPixel);
 }
 
 int main(int argc, char *argv[]) {
@@ -340,8 +350,14 @@ int main(int argc, char *argv[]) {
         renderer.render<RenderMode::BINARY>();
     else if(renderer.scene.renderMode == RenderMode::PHONG)
         renderer.render<RenderMode::PHONG>();
+    else if(renderer.scene.renderMode == RenderMode::DEBUG_BVH)
+        renderer.render<RenderMode::DEBUG_BVH>();
+    else if(renderer.scene.renderMode == RenderMode::DEBUG_NORMALS)
+        renderer.render<RenderMode::DEBUG_NORMALS>();
     else if(renderer.scene.renderMode == RenderMode::PATHTRACE)
         renderer.render<RenderMode::PATHTRACE>();
+    else if(renderer.scene.renderMode == RenderMode::PATHTRACE_INCREMENTAL)
+        renderer.render<RenderMode::PATHTRACE_INCREMENTAL>();
     else{
         std::println(stderr, "Render mode not supported yet");
         std::exit(EXIT_FAILURE);
