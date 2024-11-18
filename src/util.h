@@ -10,6 +10,8 @@
 #include <string>
 #include <fstream>
 #include <print>
+#include <atomic>
+#include <thread>
 
 // single precision for now
 using float_t = float;
@@ -1294,20 +1296,38 @@ struct Renderer{
             renderDebugBVHToBuffer();
         else if constexpr(mode == RenderMode::DEBUG_NORMALS)
             renderDebugNormalsToBuffer();
-        else if constexpr(mode == RenderMode::PATHTRACE)
-            renderPathtraceToBuffer();
-        else if constexpr(mode == RenderMode::PATHTRACE_INCREMENTAL){
+        else if constexpr(mode == RenderMode::PATHTRACE || mode == RenderMode::PATHTRACE_INCREMENTAL){
             // until user closes stdin (Ctrl+D)
-            std::println(stderr, "Rendering incrementally. Press Ctrl+D to stop after next render");
+            if constexpr(mode == RenderMode::PATHTRACE_INCREMENTAL)
+                std::println(stderr, "Rendering incrementally. Press Ctrl+D to stop after next render");
+
+            // TODO incremental and immediate still don't seem to have the exact same results for the same sample number
 
             renderPathtraceToBuffer();
             writeBufferToFile();
 
             uint32_t samplesPerPixelSoFar = scene.pathtracingSamplesPerPixel;
-            std::println(stderr, "First frame rendered, {} samples per pixel so far", samplesPerPixelSoFar);
-
             std::vector<Vec3> previousBuffer = hdrPixelBuffer;
-            while (!std::feof(stdin)){
+
+            std::atomic<bool> stopRendering = false;
+            if(mode == RenderMode::PATHTRACE)
+                stopRendering = true;
+
+            // start a thread that stops the program when the user closes stdin
+            std::jthread stopThread([&stopRendering]{
+                char _[2];
+                while(!stopRendering && std::fgets(_, sizeof(_), stdin) != nullptr);
+
+                if(!stopRendering){
+                    std::println(stderr, "Will stop rendering after this frame");
+                    stopRendering = true;
+                }
+            });
+
+            // TODO this doesnt really work yet
+            while (!stopRendering) {
+                std::println(stderr, "Frame rendered, {} samples per pixel so far", samplesPerPixelSoFar);
+
                 renderPathtraceToBuffer();
                 const uint32_t samplePixelsNow = scene.pathtracingSamplesPerPixel + samplesPerPixelSoFar;
                 // average the results
@@ -1318,8 +1338,9 @@ struct Renderer{
                 previousBuffer = hdrPixelBuffer;
 
                 samplesPerPixelSoFar = samplePixelsNow;
-                std::println(stderr, "Frame rendered, {} samples per pixel so far", samplesPerPixelSoFar);
             } 
+
+            std::println(stderr, "Rendering stopped: Final image has {} samples per pixel", samplesPerPixelSoFar);
         }else{
             // cant try gpu openacc because nvcc doesnt support c++23 :(
             // openacc might not work at all with gcc here, is basically the same time as serial
