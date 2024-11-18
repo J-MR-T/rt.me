@@ -1270,13 +1270,6 @@ struct Renderer{
         return Vec3(std::pow(color.x, 1.0f/2.2f), std::pow(color.y, 1.0f/2.2f), std::pow(color.z, 1.0f/2.2f));
     }
 
-    Vec3 shadeIntersection(const Intersection& intersectionToShade){
-        // "0th" bounce: decide on the shading model, and do tone mapping
-        auto shadedHDRColor = blinnPhongShading(intersectionToShade);
-        auto toneMapped = linearToneMapping(shadedHDRColor);
-        return toneMapped;
-    }
-
     template<bool useBVH = true>
     std::optional<Intersection> traceRayToClosestSceneIntersection(const Ray& ray){
         if constexpr(useBVH){
@@ -1338,12 +1331,12 @@ struct Renderer{
 
                     auto closestIntersection = traceRayToClosestSceneIntersection(cameraRay);
 
-                    Vec3 pixelColor = linearToneMapping(scene.backgroundColor);
+                    Vec3 pixelColor = scene.backgroundColor;
                     if(closestIntersection.has_value()){
                         if constexpr (mode == RenderMode::BINARY){
                             pixelColor = Vec3(1.0);
                         }else if constexpr (mode == RenderMode::PHONG){
-                            pixelColor = shadeIntersection(*closestIntersection);
+                            pixelColor = blinnPhongShading(*closestIntersection);
                         }else{
                             static_assert(false, "Invalid render mode");
                         }
