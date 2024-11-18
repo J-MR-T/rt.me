@@ -1484,8 +1484,6 @@ struct Renderer{
         }
     }
 
-    // TODO the pathtracing stuff here doesnt really work yet
-
     template<ImportanceSamplingTechnique samplingTechnique = COSINE_WEIGHTED_HEMISPHERE>
     Vec3 shadePathtraced(const Intersection& intersection, uint32_t bounces = 1){
         if(bounces > scene.nBounces)
@@ -1502,7 +1500,6 @@ struct Renderer{
         if(auto incomingIntersection = traceRayToClosestSceneIntersection(incomingRay)){
             incomingColor = shadePathtraced<samplingTechnique>(*incomingIntersection, bounces + 1);
         }
-        // weight by the cosine of the angle between the normal and the incoming ray
         
         // TODO could add a BRDF here, but for now, just add the color
         auto diffuse = intersection.material->diffuseColorAtTextureCoords(intersection.textureCoords) * intersection.material->kd;
@@ -1510,6 +1507,8 @@ struct Renderer{
         if constexpr(samplingTechnique == COSINE_WEIGHTED_HEMISPHERE){
             return emission + incomingColor * diffuse;
         }else if(samplingTechnique == UNIFORM){
+            // weight by the cosine of the angle between the normal and the incoming ray, this weighting is already present in the cosine weighted hemisphere sampling
+            // the 2. factor comes from dividing by the PDF, which is 1/2pi for uniform sampling. The pi in the diffuse BRDF cancels out with the pi in the PDF
             return emission + 2. * incomingColor * diffuse * intersection.surfaceNormal.dot(hemisphereSample);
         }
     }
