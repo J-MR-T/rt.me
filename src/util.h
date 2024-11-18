@@ -1366,9 +1366,15 @@ struct Renderer{
             }
         }
 
-        // then go through all them again and normalize them
-        for(auto& pixel: hdrPixelBuffer)
-            pixel = pixel / maxIntensity;
+        // then go through all of them again and normalize them, mark areas close to max intensity as red
+        static constexpr float_t redThreshhold = 0.9;
+        for(auto& pixel: hdrPixelBuffer){
+            float intensity = pixel.x;
+            if(intensity > redThreshhold * maxIntensity)
+                pixel = Vec3(1.0, 0.0, 0.0);
+            else
+                pixel = pixel / maxIntensity;
+        }
     }
 
     void renderDebugNormalsToBuffer() {
