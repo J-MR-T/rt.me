@@ -385,7 +385,7 @@ struct Texture{
         this->pixels = std::move(pixels);
     }
 
-    Vec3 colorAt(Vec2 textureCoords) const{
+    Vec3 colorAt(const Vec2& textureCoords) const{
         // wrap around
         float_t x = std::fmod(textureCoords.x, 1.);
         float_t y = std::fmod(textureCoords.y, 1.);
@@ -426,12 +426,22 @@ struct PhongMaterial {
     /// if the material has a texture, get the diffuse color at the given texture coordinates,
     /// otherwise just return the diffuse color
     /// The texture coordinates here need to be interpolated from the vertices of e.g. the triangle
-    Vec3 diffuseColorAtTextureCoords(Vec2 textureCoords) const {
+    Vec3 diffuseColorAtTextureCoords(const Vec2& textureCoords) const {
         if(texture.has_value())
             return (*texture)->colorAt(textureCoords);
         else
             return diffuseColor;
     }
+
+    /// returns the reflected color at the given texture coordinates for the given incomnig/outgoing ray pair
+    /// the diffuse part of this does *not multiply* by PI for the lambertian BRDF, as this is accounted for by *not dividing* by PI in the pathtracing shading function
+    /// note that the ray direction of the incoming ray is actually away from the intersection point, and the outgoing ray is towards the intersection point, because
+    /// we're tracing from the camera!
+    Vec3 pathtracingBRDF(const Vec2& textureCoords, const Ray& incomingRay, const Ray& outgoingRay, const Vec3& surfaceNormal) const {
+        // for now, just diffuse 
+        return diffuseColorAtTextureCoords(textureCoords) * kd;
+    }
+
 };
 
 //struct Material{
@@ -1176,6 +1186,7 @@ struct Renderer{
                 if(isInShadow(light, L))
                     continue;
 
+                // TODO probably doulbe normalize here right?
                 Vec3 V = -intersectionToShade.incomingRay->direction.normalized();
                 Vec3 H = (L + V).normalized();
                 float_t spec = std::pow(std::max(intersectionToShade.surfaceNormal.dot(H), 0.0f), 
@@ -1502,20 +1513,20 @@ struct Renderer{
             incomingColor = shadePathtraced<samplingTechnique>(*incomingIntersection, bounces + 1);
         }
         
-        // TODO could add a BRDF here, but for now, just add the color
-        auto diffuse = intersection.material->diffuseColorAtTextureCoords(intersection.textureCoords) * intersection.material->kd;
+        auto brdf = intersection.material->pathtracingBRDF(intersection.textureCoords, incomingRay, *intersection.incomingRay, intersection.surfaceNormal);
 
         if constexpr(samplingTechnique == COSINE_WEIGHTED_HEMISPHERE){
-            return emission + incomingColor * diffuse;
+            return emission + incomingColor * brdf;
         }else if(samplingTechnique == UNIFORM){
             // weight by the cosine of the angle between the normal and the incoming ray, this weighting is already present in the cosine weighted hemisphere sampling
             // the 2. factor comes from dividing by the PDF, which is 1/2pi for uniform sampling. The pi in the diffuse BRDF cancels out with the pi in the PDF
-            return emission + 2. * incomingColor * diffuse * intersection.surfaceNormal.dot(hemisphereSample);
+            return emission + 2. * incomingColor * brdf * intersection.surfaceNormal.dot(hemisphereSample);
         }
     }
 
     void renderPathtraceToBuffer(){
-#pragma omp parallel for
+        // dynamic thread scheduling improves performance by ~10% on cornell box with 6 bounces (because some rays terminate early by bouncing into nothing)
+#pragma omp parallel for collapse(2) schedule(dynamic, 64)
         for(uint32_t y = 0; y < scene.camera->heightPixels; y++){
             for(uint32_t x = 0; x < scene.camera->widthPixels; x++){
                 Vec2 pixelOrigin = Vec2(x, y);
