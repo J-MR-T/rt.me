@@ -215,22 +215,25 @@ Scene jsonFileToScene(std::string_view path){
 
     std::vector<PointLight> lights;
 
-    // get lights if rendermode is phong
-    if(renderMode == RenderMode::PHONG){
-        json lightsJ = getOrFail(sceneJ, "lightsources");
-        if(!lightsJ.is_array())
-            fail("lightsources is not an array");
-        for(auto& lightJ: lightsJ){
-            std::string type = getOrFail(lightJ, "type");
-            if(type == "pointlight"){
-                Vec3 position = jsonToVec3(getOrFail(lightJ, "position"));
-                Vec3 intensityPerColor = jsonToVec3(getOrFail(lightJ, "intensity"));
-                // there's no color specified, so we'll just always use white for now
-                lights.emplace_back(position, intensityPerColor);
-            }else{
-                // TODO area lights
-                fail("Invalid light type (if you're trying area lights: not supported yet)");
-            }
+    json lightsJ = getOrFail(sceneJ, "lightsources");
+    if(!lightsJ.is_array())
+        fail("lightsources is not an array");
+    for(auto& lightJ: lightsJ){
+        std::string type = getOrFail(lightJ, "type");
+        if(type == "pointlight"){
+            Vec3 position = jsonToVec3(getOrFail(lightJ, "position"));
+            Vec3 intensityPerColor = jsonToVec3(getOrFail(lightJ, "intensity"));
+            float_T shadowSoftness = getOrElse(lightJ, "shadowsoftness", 0.);
+            if(shadowSoftness < 0)
+                fail("Shadow softness must be positive");
+
+            if(renderMode != RenderMode::PATHTRACE && renderMode != RenderMode::PATHTRACE_INCREMENTAL && shadowSoftness != 0.)
+                fail("Shadow softness > 0 only supported in pathtracing mode");
+
+            lights.emplace_back(position, intensityPerColor, shadowSoftness);
+        }else{
+            // TODO area lights
+            fail("Invalid light type (if you're trying area lights: these are implemented as emissive objects - add an emissioncolor to an object instead)");
         }
     }
 

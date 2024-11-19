@@ -1081,6 +1081,9 @@ struct PointLight{
     Vec3 position;
     // the json files seem to integrate intensity and color into one vector
     Vec3 intensityPerColor;
+    /// 0 shadow softness means copletely hard shadows, higher means softer
+    /// ONLY AFFECTS PATHTRACED SHADOWS
+    float_T shadowSoftness;
 };
 
 enum class RenderMode{
@@ -1153,6 +1156,21 @@ struct Renderer{
         }
     }
 
+
+    bool isInShadow(const Intersection& intersection, const PointLight& light, const Vec3& L) {
+        Vec3 shadowRayOrigin = intersection.point + L * (100 * epsilon);
+        Ray shadowRay(shadowRayOrigin, L);
+
+        return isInShadow(intersection, light, shadowRay);
+    };
+
+    bool isInShadow(const Intersection& intersection, const PointLight& light, const Ray& shadowRay) {
+        if (auto shadowIntersection = traceRayToClosestSceneIntersection(shadowRay)) {
+            return (shadowIntersection->point - intersection.point).length() < (light.position - intersection.point).length() - 100 * epsilon;
+        }
+        return false;
+    }
+
     /// shades a single intersection point
     /// outputs an un-tonemapped color, not for immediate display
     Vec3 blinnPhongShading(const Intersection& intersectionToShade, uint32_t bounces = 1, float_T currentIOR = 1.) {
@@ -1167,28 +1185,16 @@ struct Renderer{
         float_T ks = intersectionToShade.material->ks;
         float_T specularExponentShinyness = intersectionToShade.material->specularExponent;
 
-        auto isInShadow = [&](const PointLight& light, const Vec3& L) -> bool {
-            Vec3 shadowRayOrigin = intersectionToShade.point + L * (100 * epsilon);
-            Ray shadowRay(shadowRayOrigin, L);
-
-            if (auto shadowIntersection = traceRayToClosestSceneIntersection(shadowRay)) {
-                return (shadowIntersection->point - intersectionToShade.point).length() < (light.position - intersectionToShade.point).length() - 100 * epsilon;
-            }
-            return false;
-        };
-
         // Helper function to calculate specular highlights
         auto calculateSpecularHighlights = [&]() -> Vec3 {
             Vec3 specularSum(0.);
 
             for(const auto& light: scene.lights) {
                 Vec3 L = (light.position - intersectionToShade.point).normalized();
-                if(isInShadow(light, L))
+                if(isInShadow(intersectionToShade, light, L))
                     continue;
 
-                // TODO probably doulbe normalize here right?
-                // TODO probably doulbe normalize here right?
-                Vec3 V = -intersectionToShade.incomingRay->direction.normalized();
+                Vec3 V = -intersectionToShade.incomingRay->direction;
                 Vec3 H = (L + V).normalized();
                 float_T spec = std::pow(std::max(intersectionToShade.surfaceNormal.dot(H), (float_T) 0.), 
                         specularExponentShinyness);
@@ -1248,7 +1254,7 @@ struct Renderer{
         float_T kd = intersectionToShade.material->kd;
         for(const auto& light: scene.lights) {
             Vec3 L = (light.position - intersectionToShade.point).normalized();
-            if(isInShadow(light, L))
+            if(isInShadow(intersectionToShade, light, L))
                 continue;
 
             Vec3 N = intersectionToShade.surfaceNormal;
@@ -1513,16 +1519,45 @@ struct Renderer{
         if(auto incomingIntersection = traceRayToClosestSceneIntersection(incomingRay)){
             incomingColor = shadePathtraced<samplingTechnique>(*incomingIntersection, bounces + 1);
         }
+
+        // start with emissio ncolor
+        Vec3 overallColor = emission;
         
-        const auto brdf = intersection.material->pathtracingBRDF(intersection.textureCoords, incomingRay, *intersection.incomingRay, intersection.surfaceNormal);
+        // sample point lights explicitly, because they are infinitessimally small, they can never be hit by a random ray
+        // luckily, the pdf of the dirac delta distribution representing these cancels out with the light intensity of the point light itself, so we can simply add it, if the light is not in shadow
+        for(const auto& light : scene.lights){
+            // permute the origin randomly if the light has some amount of softness
+            // TODO hm, could sort of also do this for phong? but would require multiple samples per pixel, that defeats the purpose of a single ray per pixel raytracer
+            Vec3 intersectionOriginPlusJitter = intersection.point + Vec3(randomFloat(), randomFloat(), randomFloat()) * light.shadowSoftness;
+
+            Vec3 L = (light.position - intersectionOriginPlusJitter).normalized();
+            Vec3 shadowRayOrigin = intersectionOriginPlusJitter + L * (100 * epsilon);
+            
+            // TODO could sample the same light source multiple times here, maybe thats required? soudn a bit like it
+
+            Ray shadowRay(shadowRayOrigin, L);
+
+            if(isInShadow(intersection, light, shadowRay))
+                continue;
+
+            // weight the contribution by the angle between the normal and the light ray
+            Vec3 brdf = intersection.material->pathtracingBRDF(intersection.textureCoords, shadowRay, *intersection.incomingRay, intersection.surfaceNormal);
+
+            float_T weight = std::max(intersection.surfaceNormal.dot(L), (float_T) 0.);
+            overallColor += brdf * weight * light.intensityPerColor;
+        }
+
+        const auto mainBounceBRDF = intersection.material->pathtracingBRDF(intersection.textureCoords, incomingRay, *intersection.incomingRay, intersection.surfaceNormal);
 
         if constexpr(samplingTechnique == COSINE_WEIGHTED_HEMISPHERE){
-            return emission + incomingColor * brdf;
+            overallColor += emission + incomingColor * mainBounceBRDF;
         }else if(samplingTechnique == UNIFORM){
             // weight by the cosine of the angle between the normal and the incoming ray, this weighting is already present in the cosine weighted hemisphere sampling
             // the 2. factor comes from dividing by the PDF, which is 1/2pi for uniform sampling. The pi in the diffuse BRDF cancels out with the pi in the PDF
-            return emission + 2. * incomingColor * brdf * intersection.surfaceNormal.dot(hemisphereSample);
+            overallColor += 2. * incomingColor * mainBounceBRDF * intersection.surfaceNormal.dot(hemisphereSample);
         }
+
+        return overallColor;
     }
 
     void renderPathtraceToBuffer(){

@@ -2,7 +2,7 @@
     "nbounces":6, 
     "samplesperpixel" : 4,
     "rendermode":"pathtrace",
-    "incremental": false,
+    "incremental": true,
     "camera":
         { 
             "type":"pinhole", 
@@ -20,8 +20,9 @@
             "lightsources":[ 
                 { 
                     "type":"pointlight", 
-                    "position":[-0.75, -0.45, 0.5], 
-                    "intensity":[0.75, 0.75, 0.75] 
+                    "position":[0.7, 0.99, 1.75],
+                    "intensity":[0.1,0.1,0.3],
+                    "shadowsoftness":0.1
                 }
             ], 
             "shapes":[ 
@@ -170,7 +171,7 @@
                             "reflectivity":0.25,
                             "isrefractive":false,
                             "refractiveindex":1.0,
-                            "emissioncolor":[40, 40, 40]
+                            "emissioncolor":[10, 10, 10]
                         } 
                 },
                 { 
@@ -189,7 +190,7 @@
                             "reflectivity":0.25,
                             "isrefractive":false,
                             "refractiveindex":1.0,
-                            "emissioncolor":[40, 40, 40]
+                            "emissioncolor":[10, 10, 10]
                         } 
                 },
                 { 
