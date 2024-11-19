@@ -11,7 +11,7 @@ SOURCES=$(wildcard src/*.cpp)
 DEPS=$(wildcard src/*.h)
 OBJECTS=$(SOURCES:src/%.cpp=build/%.o)
 
-.PHONY: release relWithDebInfo debug clean setup
+.PHONY: release relWithDebInfo debug clean setup clang-tidy
 
 release: setup $(SOURCES)
 	# for some reason, export CXXFLAGS+=... doesn't work
@@ -22,6 +22,11 @@ relWithDebInfo: setup $(SOURCES)
 
 debug: setup $(SOURCES)
 	$(MAKE) $(OUT) CXXFLAGS="$(CXXFLAGS) $(DEBUGFLAGS)"
+
+
+clang-tidy:
+	# bugprone-unchecked-optional-access check crashes clang
+	clang-tidy -checks=*,-bugprone-unchecked-optional-access,-readability-identifier-length,-*narrowing*,-llvmlibc-callee-namespace src/*.cpp src/*.h -- -x c++ $(CXXFLAGS)
 
 
 setup:

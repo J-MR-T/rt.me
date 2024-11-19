@@ -13,17 +13,17 @@
 #include <atomic>
 #include <thread>
 
-// single precision for now
-using float_t = float;
+// single precision for now, ~15% faster than double, but double precision is an option for maximum accuracy
+using float_T = float;
 
-const float_t epsilon = 1e-6;
+const float_T epsilon = 1e-6;
 
 inline bool implies(bool a, bool b){
     return !a || b;
 }
 
 struct Vec2{
-    float_t x,y;
+    float_T x,y;
 
     // see Vec3 for details on these operators
 
@@ -35,23 +35,23 @@ struct Vec2{
         return Vec2(x-other.x, y-other.y);
     }
 
-    Vec2 operator*(float_t scalar) const{
+    Vec2 operator*(float_T scalar) const{
         return Vec2(x*scalar, y*scalar);
     }
 
-    Vec2 operator/(float_t scalar) const{
+    Vec2 operator/(float_T scalar) const{
         return Vec2(x/scalar, y/scalar);
     }
 
-    friend Vec2 operator*(float_t scalar, const Vec2& vec) {
+    friend Vec2 operator*(float_T scalar, const Vec2& vec) {
         return vec * scalar;
     }
 
-    float_t dot(const Vec2& other) const{
+    float_T dot(const Vec2& other) const{
         return x*other.x + y*other.y;
     }
 
-    float_t length() const{
+    float_T length() const{
         return std::sqrt(dot(*this));
     }
 
@@ -61,11 +61,11 @@ struct Vec2{
 };
 
 struct Vec3{
-    float_t x,y,z;
+    float_T x,y,z;
 
-    Vec3(float_t x, float_t y, float_t z) : x(x), y(y), z(z){ }
+    Vec3(float_T x, float_T y, float_T z) : x(x), y(y), z(z){ }
 
-    explicit Vec3(float_t uniform) : x(uniform), y(uniform), z(uniform){ }
+    explicit Vec3(float_T uniform) : x(uniform), y(uniform), z(uniform){ }
 
     Vec3 operator+(const Vec3& other) const{
         return Vec3(x+other.x, y+other.y, z+other.z);
@@ -76,19 +76,19 @@ struct Vec3{
     }
 
     // scalar multiplication/division
-    Vec3 operator*(float_t scalar) const{
+    Vec3 operator*(float_T scalar) const{
         return Vec3(x*scalar, y*scalar, z*scalar);
     }
 
     // Friend function to overload for scalar * vector
-    friend Vec3 operator*(float_t scalar, const Vec3& vec) {
+    friend Vec3 operator*(float_T scalar, const Vec3& vec) {
         return vec * scalar;
     }
-    friend Vec3 operator/(float_t scalar, const Vec3& vec) {
+    friend Vec3 operator/(float_T scalar, const Vec3& vec) {
         return vec / scalar;
     }
 
-    Vec3 operator/(float_t scalar) const{
+    Vec3 operator/(float_T scalar) const{
         return Vec3(x/scalar, y/scalar, z/scalar);
     }
 
@@ -108,7 +108,7 @@ struct Vec3{
             std::abs(z - other.z) < epsilon;
     }
 
-    float_t operator[](size_t index) const{
+    float_T operator[](size_t index) const{
         assert(index < 3 && "Index out of bounds");
         return index == 0 ? x : (index == 1 ? y : z);
     }
@@ -124,18 +124,18 @@ struct Vec3{
         z += other.z;
         return *this;
     }
-    Vec3 operator*=(float_t scalar){
+    Vec3 operator*=(float_T scalar){
         x *= scalar;
         y *= scalar;
         z *= scalar;
         return *this;
     }
 
-    float_t dot(const Vec3& other) const{
+    float_T dot(const Vec3& other) const{
         return x*other.x + y*other.y + z*other.z;
     }
 
-    float_t length() const{
+    float_T length() const{
         return std::sqrt(dot(*this));
     }
 
@@ -151,7 +151,7 @@ struct Vec3{
                );
     }
 
-    Vec3 clamp(float_t min, float_t max){
+    Vec3 clamp(float_T min, float_T max){
         return Vec3(
             std::clamp(x, min, max),
             std::clamp(y, min, max),
@@ -159,7 +159,7 @@ struct Vec3{
         );
     }
 
-    Vec3 lerp(const Vec3& other, float_t t) const{
+    Vec3 lerp(const Vec3& other, float_T t) const{
         return *this * (1-t) + other * t;
     }
 
@@ -179,7 +179,7 @@ struct Vec3{
         );
     }
 
-    float_t distance(const Vec3& other) const{
+    float_T distance(const Vec3& other) const{
         return (*this - other).length();
     }
 };
@@ -261,11 +261,11 @@ struct Camera{
     Vec3 direction;
     Vec3 down; // we're using a right-handed coordinate system, as PPM has (0,0) in the top left, so we want to go down not up
     Vec3 right;
-    float_t width;
+    float_T width;
     uint64_t widthPixels;
-    float_t height;
+    float_T height;
     uint64_t heightPixels;
-    float_t exposure; // TODO use
+    float_T exposure; // TODO use
 
     virtual ~Camera() = default; 
 
@@ -273,10 +273,10 @@ struct Camera{
     Camera(Vec3 position,
            Vec3 lookAt,
            Vec3 up,
-           float_t width,
-           float_t height,
-           float_t exposure) : position(position), direction((lookAt - position).normalized()), down(-(up.normalized())), right(direction.cross(down).normalized()), width(width), widthPixels(std::round(width)), height(height), heightPixels(std::round(height)), exposure(exposure){
-        const float_t aspectRatio = width / height;
+           float_T width,
+           float_T height,
+           float_T exposure) : position(position), direction((lookAt - position).normalized()), down(-(up.normalized())), right(direction.cross(down).normalized()), width(width), widthPixels(std::round(width)), height(height), heightPixels(std::round(height)), exposure(exposure){
+        const float_T aspectRatio = width / height;
         imagePlaneDimensions = Vec2(aspectRatio*imagePlaneHeight, imagePlaneHeight);
     }
 
@@ -285,7 +285,7 @@ struct Camera{
     virtual Ray generateRay(Vec2 pixelInScreenSpace) const = 0;
 
 protected:
-    float_t imagePlaneHeight = 1.0;
+    float_T imagePlaneHeight = 1.0;
     Vec2 imagePlaneDimensions;
 
     /// gets a pixel in pixel screen space, i.e. [0,width]x[0,height]
@@ -294,7 +294,7 @@ protected:
         // we want to map this to [-0.5,0.5]x[-0.5,0.5] in the camera's space
         // which is then mapped to the image plane in world space
 
-        constexpr float_t pixelWidthHeight = 1.0;
+        constexpr float_T pixelWidthHeight = 1.0;
 
         Vec2 pixelCenterInCameraSpace = Vec2(
             (pixelInScreenSpace.x + /* use center of pixel */ pixelWidthHeight/2) / width - 0.5,
@@ -313,7 +313,7 @@ protected:
 
 struct OrthographicCamera : public Camera{
 
-    OrthographicCamera(Vec3 position, Vec3 direction, Vec3 up, float_t width, float_t height, float_t exposure)
+    OrthographicCamera(Vec3 position, Vec3 direction, Vec3 up, float_T width, float_T height, float_T exposure)
         : Camera(position, direction, up, width, height, exposure){ }
 
     virtual Ray generateRay(Vec2 pixelInScreenSpace) const override{
@@ -326,24 +326,24 @@ struct OrthographicCamera : public Camera{
 };
 
 struct PinholePerspectiveCamera : public Camera{
-    float_t fovDegrees;
+    float_T fovDegrees;
 
     PinholePerspectiveCamera(
         Vec3 position,
         Vec3 direction,
         Vec3 up,
-        float_t fovDegrees,
-        float_t width,
-        float_t height,
-        float_t exposure)
+        float_T fovDegrees,
+        float_T width,
+        float_T height,
+        float_T exposure)
         : Camera(position, direction, up, width, height, exposure),
           fovDegrees(fovDegrees) {
         // TODO something about this is off I think, the image seems a little bit stretched
         // TODO I think part of it is the assumed 1 unit distance to the image plane
         // Calculate image plane height based on FOV and set image plane dimensions
-        const float_t verticalFOVRad = fovDegrees * (M_PI / 180.0); // Convert FOV to radians
-        imagePlaneHeight = 2.0f * tan(verticalFOVRad / 2.0f); // Distance to image plane is 1 unit
-        const float_t aspectRatio = width / height;
+        const float_T verticalFOVRad = fovDegrees * (M_PI / 180.0); // Convert FOV to radians
+        imagePlaneHeight = 2. * tan(verticalFOVRad / 2.); // Distance to image plane is 1 unit
+        const float_T aspectRatio = width / height;
         imagePlaneDimensions = Vec2(imagePlaneHeight * aspectRatio, imagePlaneHeight);
     }
 
@@ -387,8 +387,8 @@ struct Texture{
 
     Vec3 colorAt(const Vec2& textureCoords) const{
         // wrap around
-        float_t x = std::fmod(textureCoords.x, 1.);
-        float_t y = std::fmod(textureCoords.y, 1.);
+        float_T x = std::fmod(textureCoords.x, 1.);
+        float_T y = std::fmod(textureCoords.y, 1.);
 
         // scale to pixel space
         uint32_t pixelX = static_cast<uint32_t>(x * width);
@@ -402,10 +402,10 @@ struct Texture{
 struct PhongMaterial {
     Vec3 diffuseColor;
     Vec3 specularColor;
-    float_t ks,kd;
+    float_T ks,kd;
     uint64_t specularExponent;
-    std::optional<float_t> reflectivity;
-    std::optional<float_t> refractiveIndex;
+    std::optional<float_T> reflectivity;
+    std::optional<float_T> refractiveIndex;
     // TODO somehow indicate that this is not used for phong (and rename this material accordingly)
     std::optional<Vec3> emissionColor;
     // share textures to reduce memory usage
@@ -414,11 +414,11 @@ struct PhongMaterial {
     PhongMaterial(
             Vec3 diffuseColor,
             Vec3 specularColor,
-            float_t ks,
-            float_t kd,
+            float_T ks,
+            float_T kd,
             uint64_t specularExponent,
-            std::optional<float_t> reflectivity,
-            std::optional<float_t> refractiveIndex,
+            std::optional<float_T> reflectivity,
+            std::optional<float_T> refractiveIndex,
             std::optional<Vec3> emissionColor,
             std::optional<std::shared_ptr<Texture>> texture)
         : diffuseColor(diffuseColor), specularColor(specularColor), ks(ks), kd(kd), specularExponent(specularExponent), reflectivity(reflectivity), refractiveIndex(refractiveIndex), emissionColor(emissionColor), texture(texture){ }
@@ -466,7 +466,7 @@ struct Intersection{
         assert(surfaceNormal == surfaceNormal.normalized() && "Surface normal must be normalized");
     }
 
-    float_t distance() const{
+    float_T distance() const{
         return (point - incomingRay->origin).length();
     }
 
@@ -483,10 +483,10 @@ inline PhongMaterial givenMaterialOrDefault(std::optional<PhongMaterial> materia
 
 struct Sphere {
     Vec3 center;
-    float_t radius;
+    float_T radius;
     PhongMaterial material;
 
-    Sphere(Vec3 center, float_t radius, std::optional<PhongMaterial> material)
+    Sphere(Vec3 center, float_T radius, std::optional<PhongMaterial> material)
         : center(center), radius(radius), material(givenMaterialOrDefault(std::move(material))){ }
 
     std::optional<Intersection> intersect(const Ray& ray) const {
@@ -496,12 +496,12 @@ struct Sphere {
         Vec3 oc = ray.origin - center;
 
         // Coefficients of the quadratic equation (a*t^2 + b*t + c = 0)
-        float_t a = ray.direction.dot(ray.direction);               // a = D•D
-        float_t b = 2.0 * oc.dot(ray.direction);                    // b = 2 * oc•D
-        float_t c = oc.dot(oc) - radius * radius;                   // c = (oc•oc - r^2)
+        float_T a = ray.direction.dot(ray.direction);               // a = D•D
+        float_T b = 2.0 * oc.dot(ray.direction);                    // b = 2 * oc•D
+        float_T c = oc.dot(oc) - radius * radius;                   // c = (oc•oc - r^2)
 
         // Discriminant of the quadratic equation
-        float_t discriminant = b * b - 4 * a * c;
+        float_T discriminant = b * b - 4 * a * c;
 
         // No intersection if the discriminant is negative
         if (discriminant < 0) {
@@ -509,13 +509,13 @@ struct Sphere {
         }
 
         // Calculate the two intersection distances along the ray
-        float_t sqrtDiscriminant = std::sqrt(discriminant);
-        float_t t1 = (-b - sqrtDiscriminant) / (2.0 * a);
-        float_t t2 = (-b + sqrtDiscriminant) / (2.0 * a);
+        float_T sqrtDiscriminant = std::sqrt(discriminant);
+        float_T t1 = (-b - sqrtDiscriminant) / (2.0 * a);
+        float_T t2 = (-b + sqrtDiscriminant) / (2.0 * a);
 
 
         // Choose the closest intersection point in front of the ray origin
-        float_t t = (t1 > 0) ? t1 : ((t2 > 0) ? t2 : -1);
+        float_T t = (t1 > 0) ? t1 : ((t2 > 0) ? t2 : -1);
         // if both are behind the ray, return no intersection
         if (t < 0) {
             return std::nullopt;
@@ -529,12 +529,12 @@ struct Sphere {
         Vec3 localPoint = (intersectionPoint - center) / radius; // Normalize to unit sphere
 
         // Calculate spherical coordinates
-        float_t theta = std::atan2(localPoint.z, localPoint.x); // Longitude
-        float_t phi = std::acos(localPoint.y);                  // Latitude
+        float_T theta = std::atan2(localPoint.z, localPoint.x); // Longitude
+        float_T phi = std::acos(localPoint.y);                  // Latitude
 
         // Map spherical coordinates to texture coordinates (u, v)
-        float_t u = (theta + M_PI) / (2 * M_PI);
-        float_t v = phi / M_PI;
+        float_T u = (theta + M_PI) / (2 * M_PI);
+        float_T v = phi / M_PI;
 
         return Intersection(&ray, std::move(intersectionPoint), std::move(intersectionNormal), &material, Vec2(u, v));
     }
@@ -547,12 +547,12 @@ struct Sphere {
 
 struct Cylinder {
     Vec3 center;
-    float_t radius;
-    float_t eachSideHeight;
+    float_T radius;
+    float_T eachSideHeight;
     Vec3 axis;
     PhongMaterial material;
 
-    Cylinder(Vec3 center, float_t radius, float_t height, Vec3 axis, std::optional<PhongMaterial> material)
+    Cylinder(Vec3 center, float_T radius, float_T height, Vec3 axis, std::optional<PhongMaterial> material)
         : center(center), radius(radius), eachSideHeight(height), axis(axis), material(givenMaterialOrDefault(std::move(material))){ }
 
     std::optional<Intersection> intersect(const Ray& ray) const {
@@ -562,21 +562,21 @@ struct Cylinder {
         Vec3 oc = ray.origin - center;
         Vec3 oc_proj = oc - axis * oc.dot(axis);                  // Projected ray origin onto the cylinder's plane
 
-        float_t a = d.dot(d);
-        float_t b = 2.0f * d.dot(oc_proj);
-        float_t c = oc_proj.dot(oc_proj) - radius * radius;
+        float_T a = d.dot(d);
+        float_T b = 2. * d.dot(oc_proj);
+        float_T c = oc_proj.dot(oc_proj) - radius * radius;
         std::optional<Intersection> closestIntersection = std::nullopt;
 
         // Quadratic discriminant for side wall intersection
-        float_t discriminant = b * b - 4 * a * c;
+        float_T discriminant = b * b - 4 * a * c;
         if (discriminant >= 0) {
-            float_t sqrtDiscriminant = std::sqrt(discriminant);
-            for (float_t t : { (-b - sqrtDiscriminant) / (2.0 * a), (-b + sqrtDiscriminant) / (2.0 * a) }) {
+            float_T sqrtDiscriminant = std::sqrt(discriminant);
+            for (float_T t : { (-b - sqrtDiscriminant) / (2.0 * a), (-b + sqrtDiscriminant) / (2.0 * a) }) {
                 if (t < 0) continue;
 
                 Vec3 point = ray.origin + ray.direction * t;
                 Vec3 localPoint = point - center;
-                float_t projectionOnAxis = localPoint.dot(axis);
+                float_T projectionOnAxis = localPoint.dot(axis);
 
                 // Check if intersection point is within height limits of the cylinder
                 if (projectionOnAxis >= -eachSideHeight && projectionOnAxis <= eachSideHeight) {
@@ -593,10 +593,10 @@ struct Cylinder {
         }
 
         auto checkCapIntersection = [&](const Vec3& capCenter, const Vec3& capNormal) -> std::optional<Intersection> {
-            float_t denom = ray.direction.dot(capNormal);
+            float_T denom = ray.direction.dot(capNormal);
             if (std::abs(denom) < 1e-6) return std::nullopt;
 
-            float_t tCap = (capCenter - ray.origin).dot(capNormal) / denom;
+            float_T tCap = (capCenter - ray.origin).dot(capNormal) / denom;
             if (tCap < 0) return std::nullopt;
 
             Vec3 point = ray.origin + ray.direction * tCap;
@@ -611,7 +611,7 @@ struct Cylinder {
         for (auto& cap : { std::make_pair(center - axis * eachSideHeight, -axis), 
                 std::make_pair(center + axis * eachSideHeight, axis) }) {
             if (auto capIntersection = checkCapIntersection(cap.first, cap.second); capIntersection) {
-                float_t capDistance = (capIntersection->point - ray.origin).length();
+                float_T capDistance = (capIntersection->point - ray.origin).length();
                 if (!closestIntersection || capDistance < (closestIntersection->point - ray.origin).length()) {
                     closestIntersection = capIntersection;
                 }
@@ -628,12 +628,12 @@ struct Cylinder {
 private:
     Vec2 textCoordsOfSideIntersection(const Vec3& intersectionPoint) const {
         Vec3 baseToIntersection = intersectionPoint - (center - axis * eachSideHeight);
-        float_t vPosAlongAxis = baseToIntersection.dot(axis);        
-        float_t v = vPosAlongAxis / (2 * eachSideHeight);  // Map height position to v in [0, 1]
+        float_T vPosAlongAxis = baseToIntersection.dot(axis);        
+        float_T v = vPosAlongAxis / (2 * eachSideHeight);  // Map height position to v in [0, 1]
 
         Vec3 circumferentialDir = (baseToIntersection - axis * vPosAlongAxis).normalized();
-        float_t theta = std::atan2(circumferentialDir.z, circumferentialDir.x);        
-        float_t u = (theta + M_PI) / (2 * M_PI);  // Map angle to u in [0, 1]
+        float_T theta = std::atan2(circumferentialDir.z, circumferentialDir.x);        
+        float_T u = (theta + M_PI) / (2 * M_PI);  // Map angle to u in [0, 1]
 
         return Vec2(u,v);
     }
@@ -644,11 +644,11 @@ private:
         Vec3 localCapPoint = intersectionPoint - capCenter;
 
         // Map `localCapPoint` to polar coordinates within the cap radius
-        float_t r = localCapPoint.length() / radius;  // Distance from center mapped to [0, 1]
-        float_t capTheta = std::atan2(localCapPoint.z, localCapPoint.x);
+        float_T r = localCapPoint.length() / radius;  // Distance from center mapped to [0, 1]
+        float_T capTheta = std::atan2(localCapPoint.z, localCapPoint.x);
 
-        float_t u = 0.5f + r * std::cos(capTheta) / 2;  // Map radial distance and angle to texture u
-        float_t v = 0.5f + r * std::sin(capTheta) / 2;  // Map radial distance and angle to texture v
+        float_T u = 0.5 + r * std::cos(capTheta) / 2;  // Map radial distance and angle to texture u
+        float_T v = 0.5 + r * std::sin(capTheta) / 2;  // Map radial distance and angle to texture v
 
         return Vec2(u,v);
     }
@@ -680,26 +680,26 @@ struct Triangle {
         Vec3 edge1 = v1 - v0;
         Vec3 edge2 = v2 - v0;
         Vec3 h = ray.direction.cross(edge2);
-        float_t a = edge1.dot(h);
+        float_T a = edge1.dot(h);
 
         // If a is near zero, the ray is parallel to the triangle
         if (std::abs(a) < epsilon) return std::nullopt;
 
-        float_t f = 1.0 / a;
+        float_T f = 1.0 / a;
         Vec3 s = ray.origin - v0;
-        float_t u = f * s.dot(h);
+        float_T u = f * s.dot(h);
 
         // Check if the intersection is outside the triangle
         if (u < 0.0 || u > 1.0) return std::nullopt;
 
         Vec3 q = s.cross(edge1);
-        float_t v = f * ray.direction.dot(q);
+        float_T v = f * ray.direction.dot(q);
 
         // Check if the intersection is outside the triangle
         if (v < 0.0 || u + v > 1.0) return std::nullopt;
 
         // Calculate the distance along the ray to the intersection point
-        float_t t = f * edge2.dot(q);
+        float_T t = f * edge2.dot(q);
 
         // Only accept intersections that are in front of the ray origin
         if (t > epsilon) {
@@ -715,7 +715,7 @@ struct Triangle {
 
             // interpolate texture coordinates
             // calculate barycentric coordinate `w`
-            float_t w = 1.0f - u - v;
+            float_T w = 1. - u - v;
 
             // interpolate the texture coordinates using barycentric weights
             Vec2 interpolatedTexCoord = texCoordv0 * w + texCoordv1 * u + texCoordv2 * v;
@@ -776,8 +776,8 @@ struct BoundingBox{
     Vec3 min, max;
 
     BoundingBox() :
-          min(Vec3(std::numeric_limits<float_t>::max()))
-        , max(Vec3(-std::numeric_limits<float_t>::max())) 
+          min(Vec3(std::numeric_limits<float_T>::max()))
+        , max(Vec3(-std::numeric_limits<float_T>::max())) 
     { }
 
     /// assumes min and max are actually <= each other, componentwise
@@ -825,7 +825,7 @@ struct BoundingBox{
     }
 
     Vec3 center() const { 
-        return (min + max) * 0.5f; 
+        return (min + max) * 0.5; 
     }
 
     Vec3 extent() const { 
@@ -847,8 +847,8 @@ struct BoundingBox{
 
     /*
        TODO probably either remove or merge this with the intersects function
-    float_t intersection_distance(const Ray& ray) const {
-        Vec3 invDir = Vec3(1.0f) / ray.direction;
+    float_T intersection_distance(const Ray& ray) const {
+        Vec3 invDir = Vec3(1.) / ray.direction;
 
         Vec3 t0 = (min - ray.origin) * invDir;
         Vec3 t1 = (max - ray.origin) * invDir;
@@ -856,15 +856,15 @@ struct BoundingBox{
         Vec3 tmin = t0.min(t1);
         Vec3 tmax = t0.max(t1);
 
-        float_t tenter = std::max(std::max(tmin.x, tmin.y), tmin.z);
-        float_t texit = std::min(std::min(tmax.x, tmax.y), tmax.z);
+        float_T tenter = std::max(std::max(tmin.x, tmin.y), tmin.z);
+        float_T texit = std::min(std::min(tmax.x, tmax.y), tmax.z);
 
-        return tenter <= texit && texit >= 0 ? tenter : std::numeric_limits<float_t>::max();
+        return tenter <= texit && texit >= 0 ? tenter : std::numeric_limits<float_T>::max();
     }
     */
 
     bool intersects(const Ray& ray) const {
-        Vec3 invDir = Vec3(1.0f) / ray.direction;
+        Vec3 invDir = Vec3(1.) / ray.direction;
         
         Vec3 t0 = (min - ray.origin) * invDir;
         Vec3 t1 = (max - ray.origin) * invDir;
@@ -872,8 +872,8 @@ struct BoundingBox{
         Vec3 tmin = t0.min(t1);
         Vec3 tmax = t0.max(t1);
         
-        float_t tenter = std::max(std::max(tmin.x, tmin.y), tmin.z);
-        float_t texit = std::min(std::min(tmax.x, tmax.y), tmax.z);
+        float_T tenter = std::max(std::max(tmin.x, tmin.y), tmin.z);
+        float_T texit = std::min(std::min(tmax.x, tmax.y), tmax.z);
         
         return tenter <= texit && texit >= 0;
     }
@@ -884,9 +884,9 @@ struct BoundingBox{
                min.z <= other.max.z && max.z >= other.min.z;
     }
 
-    float_t surface_area() const {
+    float_T surface_area() const {
         Vec3 d = extent();
-        return 2.0f * (d.x * d.y + d.y * d.z + d.z * d.x);
+        return 2. * (d.x * d.y + d.y * d.z + d.z * d.x);
     }
 };
 
@@ -1056,7 +1056,7 @@ private:
         return std::visit([](const auto& obj) -> Vec3 {
             using T = std::decay_t<decltype(obj)>;
             if constexpr (std::is_same_v<T, Triangle>) {
-                return (obj.v0 + obj.v1 + obj.v2) / 3.0f;
+                return (obj.v0 + obj.v1 + obj.v2) / 3.;
             } else if constexpr (std::is_same_v<T, Sphere>) {
                 return obj.center;
             } else if constexpr (std::is_same_v<T, Cylinder>) {
@@ -1148,24 +1148,24 @@ struct Renderer{
         // write buffer to file
         assert(hdrPixelBuffer.size() == scene.camera->widthPixels * scene.camera->heightPixels && "Pixel buffer size mismatch");
         for(auto& hdrPixel: hdrPixelBuffer){
-            auto ldrPixel = hdrPixel.clamp(0.0f, 1.0f);
+            auto ldrPixel = hdrPixel.clamp(0., 1.);
             writer.writePixel(ldrPixel);
         }
     }
 
     /// shades a single intersection point
     /// outputs an un-tonemapped color, not for immediate display
-    Vec3 blinnPhongShading(const Intersection& intersectionToShade, uint32_t bounces = 1, float_t currentIOR = 1.0f) {
+    Vec3 blinnPhongShading(const Intersection& intersectionToShade, uint32_t bounces = 1, float_T currentIOR = 1.) {
         if (bounces > scene.nBounces)
-            return Vec3(0.0f);
+            return Vec3(0.);
 
         // material properties
         Vec3 diffuse = intersectionToShade.material->diffuseColorAtTextureCoords(intersectionToShade.textureCoords);
-        float_t ambientIntensity = 0.25f;
+        float_T ambientIntensity = 0.25;
         Vec3 ambient = diffuse * ambientIntensity;
         Vec3 specular = intersectionToShade.material->specularColor;
-        float_t ks = intersectionToShade.material->ks;
-        float_t specularExponentShinyness = intersectionToShade.material->specularExponent;
+        float_T ks = intersectionToShade.material->ks;
+        float_T specularExponentShinyness = intersectionToShade.material->specularExponent;
 
         auto isInShadow = [&](const PointLight& light, const Vec3& L) -> bool {
             Vec3 shadowRayOrigin = intersectionToShade.point + L * (100 * epsilon);
@@ -1179,7 +1179,7 @@ struct Renderer{
 
         // Helper function to calculate specular highlights
         auto calculateSpecularHighlights = [&]() -> Vec3 {
-            Vec3 specularSum(0.0f);
+            Vec3 specularSum(0.);
 
             for(const auto& light: scene.lights) {
                 Vec3 L = (light.position - intersectionToShade.point).normalized();
@@ -1189,7 +1189,7 @@ struct Renderer{
                 // TODO probably doulbe normalize here right?
                 Vec3 V = -intersectionToShade.incomingRay->direction.normalized();
                 Vec3 H = (L + V).normalized();
-                float_t spec = std::pow(std::max(intersectionToShade.surfaceNormal.dot(H), 0.0f), 
+                float_T spec = std::pow(std::max(intersectionToShade.surfaceNormal.dot(H), (float_T) 0.), 
                         specularExponentShinyness);
                 specularSum += specular * spec * light.intensityPerColor * ks;
             }
@@ -1201,23 +1201,23 @@ struct Renderer{
             // make sure to still have specular highlights on transparent objects
             // these would be weighted by the objects transmissiveness, but as that doesnt exist, just add them for now
             Vec3 finalColor = calculateSpecularHighlights();
-            float_t materialIOR = *intersectionToShade.material->refractiveIndex;
+            float_T materialIOR = *intersectionToShade.material->refractiveIndex;
 
             bool entering = intersectionToShade.incomingRay->direction.dot(intersectionToShade.surfaceNormal) < 0;
             Vec3 normal = entering ? intersectionToShade.surfaceNormal : -intersectionToShade.surfaceNormal;
-            float_t etaRatio = entering ? currentIOR / materialIOR : materialIOR / currentIOR;
+            float_T etaRatio = entering ? currentIOR / materialIOR : materialIOR / currentIOR;
 
-            float_t cosTheta_i = -normal.dot(intersectionToShade.incomingRay->direction);
-            float_t sinTheta_t_squared = etaRatio * etaRatio * (1.0f - cosTheta_i * cosTheta_i);
+            float_T cosTheta_i = -normal.dot(intersectionToShade.incomingRay->direction);
+            float_T sinTheta_t_squared = etaRatio * etaRatio * (1. - cosTheta_i * cosTheta_i);
 
-            if (sinTheta_t_squared <= 1.0f) {
-                float_t cosTheta_t = std::sqrt(1.0f - sinTheta_t_squared);
+            if (sinTheta_t_squared <= 1.) {
+                float_T cosTheta_t = std::sqrt(1. - sinTheta_t_squared);
                 Vec3 refractedDir = etaRatio * intersectionToShade.incomingRay->direction + 
                     (etaRatio * cosTheta_i - cosTheta_t) * normal;
 
                 Ray refractedRay(intersectionToShade.point + refractedDir * (10 * epsilon), refractedDir);
                 // TODO refracting exiting being air doesnt really work I think, it should somehow be dependent on whether the intersection is inside the current intersected object or outside
-                float_t nextIOR = entering ? materialIOR : 1.0f;
+                float_T nextIOR = entering ? materialIOR : 1.;
 
                 Vec3 refractedColor = scene.backgroundColor;
                 if (auto refractedIntersection = traceRayToClosestSceneIntersection(refractedRay)) {
@@ -1239,19 +1239,19 @@ struct Renderer{
         }
 
         // Regular materials: ambient + diffuse + specular + reflection
-        Vec3 color(0.0f);
+        Vec3 color(0.);
 
         // Ambient and diffuse
         color += ambient;  // ambient
 
-        float_t kd = intersectionToShade.material->kd;
+        float_T kd = intersectionToShade.material->kd;
         for(const auto& light: scene.lights) {
             Vec3 L = (light.position - intersectionToShade.point).normalized();
             if(isInShadow(light, L))
                 continue;
 
             Vec3 N = intersectionToShade.surfaceNormal;
-            float_t diff = std::max(N.dot(L), 0.0f);
+            float_T diff = std::max(N.dot(L), (float_T) 0.);
             color += diffuse * diff * light.intensityPerColor * kd;  // diffuse
         }
 
@@ -1283,7 +1283,7 @@ struct Renderer{
     }
 
     Vec3 gammaCorrect(Vec3 color){
-        return Vec3(std::pow(color.x, 1.0f/2.2f), std::pow(color.y, 1.0f/2.2f), std::pow(color.z, 1.0f/2.2f));
+        return Vec3(std::pow(color.x, 1./2.2), std::pow(color.y, 1./2.2), std::pow(color.z, 1./2.2));
     }
 
     template<bool useBVH = true>
@@ -1386,7 +1386,7 @@ struct Renderer{
 
     void renderDebugBVHToBuffer() {
         // serially, so we dont have to use atomic accesses on the max intensity
-        float_t maxIntensity = 0.;
+        float_T maxIntensity = 0.;
         for(uint32_t y = 0; y < scene.camera->heightPixels; y++){
             for(uint32_t x = 0; x < scene.camera->widthPixels; x++){
                 Ray cameraRay = scene.camera->generateRay(Vec2(x, y));
@@ -1395,16 +1395,16 @@ struct Renderer{
                 bvh.recursivelyCollectIntersectedBoxes(cameraRay, intersected_boxes);
 
                 // just write the size to the buffer for now, and keep track of the max
-                float_t intensity = intersected_boxes.size();
+                float_T intensity = intersected_boxes.size();
                 maxIntensity = std::max(maxIntensity, intensity);
                 bufferSpecificPixel(Vec2(x, y), Vec3(intensity, intensity, intensity));
             }
         }
 
         // then go through all of them again and normalize them, mark areas close to max intensity as red
-        static constexpr float_t redThreshhold = 0.9;
+        static constexpr float_T redThreshhold = 0.9;
         for(auto& pixel: hdrPixelBuffer){
-            float_t intensity = pixel.x;
+            float_T intensity = pixel.x;
             if(intensity > redThreshhold * maxIntensity)
                 pixel = Vec3(1.0, 0.0, 0.0);
             else
@@ -1418,7 +1418,7 @@ struct Renderer{
                 Ray cameraRay = scene.camera->generateRay(Vec2(x, y));
 
                 if(auto closestIntersection = traceRayToClosestSceneIntersection(cameraRay)){
-                    auto normalZeroOne = closestIntersection->surfaceNormal * 0.5f + Vec3(0.5f);
+                    auto normalZeroOne = closestIntersection->surfaceNormal * 0.5 + Vec3(0.5);
                     bufferSpecificPixel(Vec2(x, y), normalZeroOne);
                 }
             }
@@ -1426,12 +1426,12 @@ struct Renderer{
     }
 
     /// generate a uniformly distributed random float in [0, 1)
-    float_t randomFloat() {
+    float_T randomFloat() {
         // initial generated by chatgpt, thread safe by me
         // make thread safe by ensuring each thread has its own generator
         thread_local static std::random_device rd;
         thread_local static std::mt19937 gen(rd());
-        thread_local static std::uniform_real_distribution<float_t> dis(0., 1.);
+        thread_local static std::uniform_real_distribution<float_T> dis(0., 1.);
         return dis(gen);
     }
 
@@ -1451,15 +1451,15 @@ struct Renderer{
             // To get the correct value of dividing by the PDF (cos(theta)/pi), we have to multiply by pi again
 
             // Generate two random numbers for disk sampling
-            float_t r = sqrt(randomFloat());
-            float_t theta = 2.0f * M_PI * randomFloat();
+            float_T r = sqrt(randomFloat());
+            float_T theta = 2.0 * M_PI * randomFloat();
 
             // Convert uniform disk samples to hemisphere samples
-            float_t x = r * cos(theta);
-            float_t y = r * sin(theta);
+            float_T x = r * cos(theta);
+            float_T y = r * sin(theta);
 
             // Project up to hemisphere
-            float_t z = sqrt(1.0f - x*x - y*y);
+            float_T z = sqrt(1.0 - x*x - y*y);
 
             // Create a coordinate system from the normal
             // TODO that z check is strange
@@ -1471,9 +1471,9 @@ struct Renderer{
             // TODO hmmm, this will always give positive results though, right?
             return (tangent * x + bitangent * y + normal * z).normalized();
         }else if constexpr (technique == UNIFORM){
-            float_t phi = 2.0 * M_PI * randomFloat();
-            float_t z = randomFloat();
-            float_t r = std::sqrt(1.0 - z*z);
+            float_T phi = 2.0 * M_PI * randomFloat();
+            float_T z = randomFloat();
+            float_T r = std::sqrt(1.0 - z*z);
 
             // Create basis vectors
             Vec3 up = normal;
@@ -1501,10 +1501,10 @@ struct Renderer{
         if(bounces > scene.nBounces)
             return Vec3(scene.backgroundColor);
 
-        Vec3 emission = intersection.material->emissionColor.value_or(Vec3(0.0f));
+        const Vec3 emission = intersection.material->emissionColor.value_or(Vec3(0.));
 
         // add diffuse incoming light from all directions
-        Vec3 hemisphereSample = sampleHemisphere<samplingTechnique>(intersection.surfaceNormal);
+        const Vec3 hemisphereSample = sampleHemisphere<samplingTechnique>(intersection.surfaceNormal);
 
         Ray incomingRay(intersection.point + hemisphereSample * (10 * epsilon), hemisphereSample);
 
@@ -1513,7 +1513,7 @@ struct Renderer{
             incomingColor = shadePathtraced<samplingTechnique>(*incomingIntersection, bounces + 1);
         }
         
-        auto brdf = intersection.material->pathtracingBRDF(intersection.textureCoords, incomingRay, *intersection.incomingRay, intersection.surfaceNormal);
+        const auto brdf = intersection.material->pathtracingBRDF(intersection.textureCoords, incomingRay, *intersection.incomingRay, intersection.surfaceNormal);
 
         if constexpr(samplingTechnique == COSINE_WEIGHTED_HEMISPHERE){
             return emission + incomingColor * brdf;
@@ -1529,7 +1529,7 @@ struct Renderer{
 #pragma omp parallel for collapse(2) schedule(dynamic, 64)
         for(uint32_t y = 0; y < scene.camera->heightPixels; y++){
             for(uint32_t x = 0; x < scene.camera->widthPixels; x++){
-                Vec2 pixelOrigin = Vec2(x, y);
+                const Vec2 pixelOrigin = Vec2(x, y);
                 Vec3 colorSum = Vec3(0.);
                 for(uint32_t sample = 0; sample < scene.pathtracingSamplesPerPixel; sample++){
                     // permute ray randomly/evenly (TODO importance sampling later)

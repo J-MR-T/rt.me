@@ -2,7 +2,7 @@
     "nbounces":6, 
     "samplesperpixel" : 4,
     "rendermode":"pathtrace",
-    "incremental": true,
+    "incremental": false,
     "camera":
         { 
             "type":"pinhole", 
