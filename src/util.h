@@ -1187,6 +1187,7 @@ struct Renderer{
                     continue;
 
                 // TODO probably doulbe normalize here right?
+                // TODO probably doulbe normalize here right?
                 Vec3 V = -intersectionToShade.incomingRay->direction.normalized();
                 Vec3 H = (L + V).normalized();
                 float_T spec = std::pow(std::max(intersectionToShade.surfaceNormal.dot(H), (float_T) 0.), 
