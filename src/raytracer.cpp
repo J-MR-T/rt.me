@@ -176,6 +176,9 @@ Scene jsonFileToScene(std::string_view path){
     std::unordered_map<std::string, std::shared_ptr<Texture>> textures;
 
     uint32_t pathtracingSamplesPerPixel = 0;
+    uint32_t pathtracingApertureSamplesPerPixelSample = 0;
+    uint32_t pathtracingPointLightsamplesPerBounce = 0;
+    uint32_t pathtracingHemisphereSamplesPerBounce = 0;
 
     // get render mode
     RenderMode renderMode;
@@ -189,29 +192,59 @@ Scene jsonFileToScene(std::string_view path){
         renderMode = RenderMode::DEBUG_NORMALS;
     else if(renderModeS == "pathtrace"){
         renderMode = RenderMode::PATHTRACE;
-        pathtracingSamplesPerPixel = getOrFail(root, "samplesperpixel");
-        if(getOrFail(root, "incremental"))
+
+        json pathtracingOpts = getOrFail(root, "pathtracingOpts");
+
+        pathtracingSamplesPerPixel = getOrFail(pathtracingOpts, "samplesPerPixel");
+        pathtracingApertureSamplesPerPixelSample = getOrFail(pathtracingOpts, "apertureSamplesPerPixelSample");
+        pathtracingPointLightsamplesPerBounce = getOrFail(pathtracingOpts, "pointLightSamplesPerBounce");
+        pathtracingHemisphereSamplesPerBounce = getOrFail(pathtracingOpts, "hemisphereSamplesPerBounce");
+        if(getOrFail(pathtracingOpts, "incremental"))
             renderMode = RenderMode::PATHTRACE_INCREMENTAL;
+        
+        // warn about hemispehre samples per bounce
+        if(pathtracingHemisphereSamplesPerBounce > 1)
+            std::println(stderr, "Warning: Hemisphere samples per bounce > 1 is supported, but not recommended, as it will result in exponential time complexity. Use at your own peril.");
     } else
         fail("Invalid rendermode");
 
 
     // get camera
     std::string cameraType = getOrFail(cameraJ, "type");
-    // TODO for now just pinhole allowed
-    if(cameraType != "pinhole")
-        fail("Invalid camera type");
-
-    // TODO this needs to be a pinhole camera in the future
-    PinholePerspectiveCamera camera(
-        jsonToVec3(getOrFail(cameraJ, "position")),
-        jsonToVec3(getOrFail(cameraJ, "lookAt")),
-        jsonToVec3(getOrFail(cameraJ, "upVector")),
-        (float_t) getOrFail(cameraJ,  "fov"),
-        (float_t) getOrFail(cameraJ,  "width"),
-        (float_t) getOrFail(cameraJ,  "height"),
-        (float_t) getOrFail(cameraJ,  "exposure")
-    );
+    std::unique_ptr<Camera> camera;
+    if(cameraType == "pinhole"){
+        camera = std::make_unique<PinholePerspectiveCamera>(
+            jsonToVec3(getOrFail(cameraJ, "position")),
+            jsonToVec3(getOrFail(cameraJ, "lookAt")),
+            jsonToVec3(getOrFail(cameraJ, "upVector")),
+            (float_t) getOrFail(cameraJ,  "fov"),
+            (float_t) getOrFail(cameraJ,  "width"),
+            (float_t) getOrFail(cameraJ,  "height"),
+            (float_t) getOrFail(cameraJ,  "exposure")
+        );
+    }else if(cameraType == "orthographic"){
+        camera = std::make_unique<OrthographicCamera>(
+            jsonToVec3(getOrFail(cameraJ, "position")),
+            jsonToVec3(getOrFail(cameraJ, "lookAt")),
+            jsonToVec3(getOrFail(cameraJ, "upVector")),
+            (float_t) getOrFail(cameraJ,  "width"),
+            (float_t) getOrFail(cameraJ,  "height"),
+            (float_t) getOrFail(cameraJ,  "exposure")
+        );
+    }else if(cameraType == "thinlens"){
+        camera = std::make_unique<SimplifiedThinLensCamera>(
+            jsonToVec3(getOrFail(cameraJ, "position")),
+            jsonToVec3(getOrFail(cameraJ, "lookAt")),
+            jsonToVec3(getOrFail(cameraJ, "upVector")),
+            (float_t) getOrFail(cameraJ,  "fov"),
+            (float_t) getOrFail(cameraJ,  "width"),
+            (float_t) getOrFail(cameraJ,  "height"),
+            (float_t) getOrFail(cameraJ,  "exposure"),
+            (float_t) getOrFail(cameraJ,  "fstop"),
+            (float_t) getOrFail(cameraJ,  "focalLength"),
+            (float_t) getOrFail(cameraJ,  "focusDistance")
+        );
+    }
 
     std::vector<PointLight> lights;
 
@@ -223,7 +256,7 @@ Scene jsonFileToScene(std::string_view path){
         if(type == "pointlight"){
             Vec3 position = jsonToVec3(getOrFail(lightJ, "position"));
             Vec3 intensityPerColor = jsonToVec3(getOrFail(lightJ, "intensity"));
-            float_T shadowSoftness = getOrElse(lightJ, "shadowsoftness", 0.);
+            float_T shadowSoftness = getOrElse(lightJ, "shadowSoftness", 0.);
             if(shadowSoftness < 0)
                 fail("Shadow softness must be positive");
 
@@ -320,7 +353,17 @@ Scene jsonFileToScene(std::string_view path){
             fail("Invalid shape");
         }
     }
-    return Scene(nBounces, renderMode, std::make_unique<PinholePerspectiveCamera>(camera), backgroundColor, lights, sceneObjects, pathtracingSamplesPerPixel);
+    return Scene(nBounces,
+        renderMode,
+        std::move(camera),
+        backgroundColor,
+        lights,
+        sceneObjects,
+        pathtracingSamplesPerPixel,
+        pathtracingApertureSamplesPerPixelSample,
+        pathtracingPointLightsamplesPerBounce,
+        pathtracingHemisphereSamplesPerBounce
+    );
 }
 
 int main(int argc, char *argv[]) {

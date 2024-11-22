@@ -1,10 +1,10 @@
-# standard cpp makefile
-# g++ 14.2.1
+# tested with gcc 14.2.1
 
 CXX=g++
 OUT=raytracer
 
-CXXFLAGS=-Wall -Wextra -Wpedantic -O3 -std=c++2b -I./include -fopenmp -fopenacc
+# -Ofast is ~10% fatser than -O3, and we dont care so much about fp precision
+CXXFLAGS=-Wall -Wextra -Wpedantic -Ofast -std=c++2b -I./include -fopenmp -fopenacc
 DEBUGFLAGS=-fsanitize=address -fsanitize=undefined -fsanitize=leak -O0 -g
 
 SOURCES=$(wildcard src/*.cpp)
@@ -22,6 +22,12 @@ relWithDebInfo: setup $(SOURCES)
 
 debug: setup $(SOURCES)
 	$(MAKE) $(OUT) CXXFLAGS="$(CXXFLAGS) $(DEBUGFLAGS)"
+
+pgo-generate: setup $(SOURCES)
+	$(MAKE) $(OUT) CXXFLAGS="$(CXXFLAGS) -DNDEBUG -fprofile-generate"
+
+pgo-utilize: setup $(SOURCES)
+	$(MAKE) $(OUT) CXXFLAGS="$(CXXFLAGS) -DNDEBUG -fprofile-use"
 
 
 clang-tidy:

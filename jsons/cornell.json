@@ -1,8 +1,13 @@
 {
     "nbounces":6, 
-    "samplesperpixel" : 4,
     "rendermode":"pathtrace",
-    "incremental": true,
+    "pathtracingOpts" : {
+        "samplesPerPixel" : 4,
+        "apertureSamplesPerPixelSample" : 1,
+        "pointLightSamplesPerBounce" : 1,
+        "hemisphereSamplesPerBounce" : 1,
+        "incremental": true
+    },
     "camera":
         { 
             "type":"pinhole", 
@@ -20,9 +25,9 @@
             "lightsources":[ 
                 { 
                     "type":"pointlight", 
-                    "position":[0.7, 0.99, 1.75],
-                    "intensity":[0.1,0.1,0.3],
-                    "shadowsoftness":0.1
+                    "position":[0.7, 0.9, 1.75],
+                    "intensity":[0.0,0.1,0.3],
+                    "shadowSoftness":0.1
                 }
             ], 
             "shapes":[ 
@@ -43,6 +48,23 @@
                             "refractiveindex":1.0,
                             "texture":"textures/globe.ppm"
 
+                        } 
+                },
+                { 
+                    "type":"sphere", 
+                    "center": [1, 1, 2],
+                    "radius":0.1, 
+                    "material":
+                        { 
+                            "ks":0.1, 
+                            "kd":2.9, 
+                            "specularexponent":20, 
+                            "diffusecolor":[0,0.25,0.75],
+                            "specularcolor":[1.0,1.0,1.0],
+                            "isreflective":false,
+                            "reflectivity":1.0,
+                            "isrefractive":false,
+                            "refractiveindex":1.0
                         } 
                 },
                 {
