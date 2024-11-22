@@ -747,6 +747,7 @@ struct Triangle {
     // TODO could precompute bounding box or mins/maxes for faster building of the BVH
 
     Vec3 normal = (v1-v0).cross(v2-v0).normalized();
+
     Triangle(Vec3 v0, Vec3 v1, Vec3 v2, std::optional<PhongMaterial> material, Vec2 texCoordv0, Vec2 texCoordv1, Vec2 texCoordv2)
         : v0(v0), v1(v1), v2(v2), material(givenMaterialOrDefault(std::move(material))), texCoordv0(texCoordv0), texCoordv1(texCoordv1), texCoordv2(texCoordv2){ }
 
@@ -815,6 +816,7 @@ struct Triangle {
 };
 
 struct SceneObject {
+    // use a variant to store different types of objects, to avoid virtual function calls (expensive)
     std::variant<Triangle, Sphere, Cylinder> variant;
 
     std::optional<Intersection> intersect(const Ray& ray) const {
@@ -946,45 +948,45 @@ struct BoundingBox{
     }
 };
 
-struct ObjectRange{
-    /// left-inclusive, right-exclusive
-    std::pair<size_t, size_t> objectRange;
-
-    // allow implicit conversion
-    ObjectRange(std::pair<size_t, size_t> objectRange)
-        : objectRange(objectRange){ }
-
-    ObjectRange(size_t first, size_t last)
-        : objectRange(std::make_pair(first, last)){ }
-
-    size_t size() const{
-        return objectRange.second - objectRange.first;
-    }
-
-    bool empty() const{
-        return objectRange.first == objectRange.second;
-    }
-
-    bool operator==(const ObjectRange& other) const{
-        return objectRange == other.objectRange;
-    }
-
-    size_t begin() const{
-        return objectRange.first;
-    }
-
-    size_t end() const{
-        return objectRange.second;
-    }
-
-    // implicit conversion to pair
-    operator std::pair<size_t, size_t>() const{
-        return objectRange;
-    }
-};
-
 /// bounding volume hierarchy
 struct BVHNode{
+    struct ObjectRange{
+        /// left-inclusive, right-exclusive
+        std::pair<size_t, size_t> objectRange;
+
+        // allow implicit conversion
+        ObjectRange(std::pair<size_t, size_t> objectRange)
+            : objectRange(objectRange){ }
+
+        ObjectRange(size_t first, size_t last)
+            : objectRange(std::make_pair(first, last)){ }
+
+        size_t size() const{
+            return objectRange.second - objectRange.first;
+        }
+
+        bool empty() const{
+            return objectRange.first == objectRange.second;
+        }
+
+        bool operator==(const ObjectRange& other) const{
+            return objectRange == other.objectRange;
+        }
+
+        size_t begin() const{
+            return objectRange.first;
+        }
+
+        size_t end() const{
+            return objectRange.second;
+        }
+
+        // implicit conversion to pair
+        operator std::pair<size_t, size_t>() const{
+            return objectRange;
+        }
+    };
+
     BoundingBox bounds;
     std::unique_ptr<BVHNode> left, right;
     /// range of objects in the scene object list that this node represents
@@ -1004,17 +1006,19 @@ public:
         assert(objectRange.begin() <= objectRange.end() && "Invalid objectRange");
         assert(objectRange.end() <= objects.size() && "objectRange exceeds object vector");
 
+        // get the maximum bounds of all objects in the range
         bounds = boundsFromObjectRange(objectRange, objects);
         
         if (depth >= MAX_DEPTH)
             return;
 
-        // Find the axis with greatest extent
+        // Find the axis with greatest extent, to be able to subdivide as equally as possible
         Vec3 extent = bounds.extent();
         int splitAxis = 0;
         if (extent.y > extent.x) splitAxis = 1;
         if (extent.z > extent[splitAxis]) splitAxis = 2;
 
+        // partition objects along the median of the split axis
         auto begin = objects.begin() + objectRange.begin();
         auto end = objects.begin() + objectRange.end();
         std::nth_element(begin, begin + (end - begin)/2, end,
@@ -1024,6 +1028,7 @@ public:
         );
         size_t midIndex = objectRange.begin() + (objectRange.end() - objectRange.begin()) / 2;
         
+        // only create children if there are actually objects in the range
         if (midIndex > objectRange.begin() && midIndex < objectRange.end()) {
             left = std::make_unique<BVHNode>(ObjectRange(objectRange.begin(), midIndex), objects, depth + 1);
             right = std::make_unique<BVHNode>(ObjectRange(midIndex, objectRange.end()), objects, depth + 1);
@@ -1158,16 +1163,8 @@ struct Scene{
     std::unique_ptr<Camera> camera;
     Vec3 backgroundColor;
 
-    std::vector<PointLight> lights;
+    std::vector<PointLight> pointLights;
 
-    // use separate vectors for each type of object (and dont use polymorphism) for better cache locality
-    // would have to use
-    // a dynamic dispatch for each intersection (very expensive), and
-    // b pointers inside the vectors, ruining cache locality
-    //std::vector<Triangle> triangles;
-    //std::vector<Sphere> spheres;
-    //std::vector<Cylinder> cylinders;
-    //
     std::vector<SceneObject> objects;
 
     struct {
@@ -1193,7 +1190,7 @@ struct Scene{
         renderMode(renderMode),
         camera(std::move(camera)),
         backgroundColor(backgroundColor),
-        lights(std::move(lights)),
+        pointLights(std::move(lights)),
         objects(std::move(objects)),
         pathtracingSamples(
             pathtracingSamplesPerPixel,
@@ -1218,7 +1215,7 @@ struct Renderer{
           writer(outputFilePath, this->scene.camera->widthPixels, this->scene.camera->heightPixels),
           hdrPixelBuffer(this->scene.camera->widthPixels*this->scene.camera->heightPixels, Vec3(0.)),
           // this reorders the objects in the scene to be able to build the BVH
-          bvh(BVHNode(ObjectRange(0, this->scene.objects.size()), this->scene.objects))
+          bvh(BVHNode(BVHNode::ObjectRange(0, this->scene.objects.size()), this->scene.objects))
     {}
 
     void bufferSpecificPixel(Vec2 pixel, Vec3 color){
@@ -1266,11 +1263,10 @@ struct Renderer{
         float_T ks = intersectionToShade.material->ks;
         float_T specularExponentShinyness = intersectionToShade.material->specularExponent;
 
-        // Helper function to calculate specular highlights
         auto calculateSpecularHighlights = [&]() -> Vec3 {
             Vec3 specularSum(0.);
 
-            for(const auto& light: scene.lights) {
+            for(const auto& light: scene.pointLights) {
                 Vec3 L = (light.position - intersectionToShade.point).normalized();
                 if(isInShadow(intersectionToShade, light, L))
                     continue;
@@ -1318,7 +1314,7 @@ struct Renderer{
                 return finalColor;
             }else{
                 // Total internal reflection
-                // handle by simply going on with the normal lighting nor now
+                // handle by simply going on with the normal lighting for now
                 // TODO to look somewhat realistic, this curently requires the material to be reflective
                 //      but thats somewhat consistent with the phong lighting model idea: you're responsible for
                 //      a realistic looking material, not the renderer
@@ -1333,7 +1329,7 @@ struct Renderer{
         color += ambient;  // ambient
 
         float_T kd = intersectionToShade.material->kd;
-        for(const auto& light: scene.lights) {
+        for(const auto& light: scene.pointLights) {
             Vec3 L = (light.position - intersectionToShade.point).normalized();
             if(isInShadow(intersectionToShade, light, L))
                 continue;
@@ -1619,7 +1615,7 @@ struct Renderer{
         {
             // sample point lights explicitly, because they are infinitessimally small, they can never be hit by a random ray
             // luckily, the pdf of the dirac delta distribution representing these cancels out with the light intensity of the point light itself, so we can simply add it, if the light is not in shadow
-            for(const auto& light : scene.lights){
+            for(const auto& light : scene.pointLights){
 
 
                 // optionally sample each light source multiple times
