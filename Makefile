@@ -23,11 +23,12 @@ relWithDebInfo: setup $(SOURCES)
 debug: setup $(SOURCES)
 	$(MAKE) $(OUT) CXXFLAGS="$(CXXFLAGS) $(DEBUGFLAGS)"
 
+# PGO results in ~ 10% speedup for cornell box (when trained on cornell box)
 pgo-generate: setup $(SOURCES)
 	$(MAKE) $(OUT) CXXFLAGS="$(CXXFLAGS) -DNDEBUG -fprofile-generate"
 
 pgo-utilize: setup $(SOURCES)
-	$(MAKE) $(OUT) CXXFLAGS="$(CXXFLAGS) -DNDEBUG -fprofile-use"
+	$(MAKE) $(OUT) CXXFLAGS="$(CXXFLAGS) -DNDEBUG -fprofile-correction -fprofile-use"
 
 
 clang-tidy:

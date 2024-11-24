@@ -12,6 +12,7 @@
 #include <print>
 #include <atomic>
 #include <thread>
+#include <format>
 
 // single precision for now, ~15% faster than double, but double precision is an option for maximum accuracy
 using float_T = float;
@@ -143,10 +144,16 @@ struct Vec3{
         z += other.z;
         return *this;
     }
-    Vec3 operator*=(float_T scalar){
+    Vec3& operator*=(float_T scalar){
         x *= scalar;
         y *= scalar;
         z *= scalar;
+        return *this;
+    }
+    Vec3& operator/=(float_T scalar){
+        x /= scalar;
+        y /= scalar;
+        z /= scalar;
         return *this;
     }
 
@@ -201,6 +208,19 @@ struct Vec3{
     float_T distance(const Vec3& other) const{
         return (*this - other).length();
     }
+};
+
+// overload std::format/std::println for Vec3
+template <>
+struct std::formatter<Vec3> : std::formatter<std::string> {
+  auto format(const Vec3& v, format_context& ctx) const {
+    return formatter<string>::format(std::format("[{}, {}, {}]", v.x, v.y, v.z), ctx);
+  }
+};
+
+template <>
+struct std::basic_format_arg<Vec3> {
+
 };
 
 struct PPMWriter{
@@ -482,17 +502,28 @@ struct Texture{
     }
 };
 
-struct PhongMaterial {
-    Vec3 diffuseColor;
+struct MaterialBase{
+    Vec3 diffuseBaseColor;
+    // share textures to reduce memory usage
+    std::optional<std::shared_ptr<Texture>> texture;
+
+    /// if the material has a texture, get the diffuse color at the given texture coordinates,
+    /// otherwise just return the diffuse color
+    /// The texture coordinates here need to be interpolated from the vertices of e.g. the triangle
+    Vec3 diffuseColorAtTextureCoords(const Vec2& textureCoords) const {
+        if(texture.has_value())
+            return (*texture)->colorAt(textureCoords);
+        else
+            return diffuseBaseColor;
+    }
+};
+
+struct PhongMaterial : MaterialBase {
     Vec3 specularColor;
     float_T ks,kd;
     uint64_t specularExponent;
     std::optional<float_T> reflectivity;
     std::optional<float_T> refractiveIndex;
-    // TODO somehow indicate that this is not used for phong (and rename this material accordingly)
-    std::optional<Vec3> emissionColor;
-    // share textures to reduce memory usage
-    std::optional<std::shared_ptr<Texture>> texture;
 
     PhongMaterial(
             Vec3 diffuseColor,
@@ -502,9 +533,8 @@ struct PhongMaterial {
             uint64_t specularExponent,
             std::optional<float_T> reflectivity,
             std::optional<float_T> refractiveIndex,
-            std::optional<Vec3> emissionColor,
             std::optional<std::shared_ptr<Texture>> texture)
-        : diffuseColor(diffuseColor), specularColor(specularColor), ks(ks), kd(kd), specularExponent(specularExponent), reflectivity(reflectivity), refractiveIndex(refractiveIndex), emissionColor(emissionColor), texture(texture){ }
+        : MaterialBase(diffuseColor, texture), specularColor(specularColor), ks(ks), kd(kd), specularExponent(specularExponent), reflectivity(reflectivity), refractiveIndex(refractiveIndex) { }
 
     /// if the material has a texture, get the diffuse color at the given texture coordinates,
     /// otherwise just return the diffuse color
@@ -513,7 +543,45 @@ struct PhongMaterial {
         if(texture.has_value())
             return (*texture)->colorAt(textureCoords);
         else
-            return diffuseColor;
+            return diffuseBaseColor;
+    }
+
+};
+
+struct PrincipledBRDFMaterial : MaterialBase{
+    float_T emissiveness;
+
+    float_T baseColorIntensity;
+    float_T metallic;
+    float_T subsurface;
+    float_T specular;
+    float_T roughness;
+    float_T specularTint;
+    float_T anisotropic;
+    float_T sheen;
+    float_T sheenTint;
+    float_T clearcoat;
+    float_T clearcoatGloss;
+
+    PrincipledBRDFMaterial(
+            Vec3 diffuseColor,
+            std::optional<std::shared_ptr<Texture>> texture,
+            float_T emissiveness,
+            float_T baseColorIntensity,
+            float_T metallic,
+            float_T subsurface,
+            float_T specular,
+            float_T roughness,
+            float_T specularTint,
+            float_T anisotropic,
+            float_T sheen,
+            float_T sheenTint,
+            float_T clearcoat,
+            float_T clearcoatGloss)
+        : MaterialBase(diffuseColor, texture), emissiveness(emissiveness), baseColorIntensity(baseColorIntensity), metallic(metallic), subsurface(subsurface), specular(specular), roughness(roughness), specularTint(specularTint), anisotropic(anisotropic), sheen(sheen), sheenTint(sheenTint), clearcoat(clearcoat), clearcoatGloss(clearcoatGloss) { }
+
+    Vec3 emissionColor(const Vec2& textureCoords) const {
+        return emissiveness * diffuseColorAtTextureCoords(textureCoords);
     }
 
     /// returns the reflected color at the given texture coordinates for the given incomnig/outgoing ray pair
@@ -521,19 +589,176 @@ struct PhongMaterial {
     /// note that the ray direction of the incoming ray is actually away from the intersection point, and the outgoing ray is towards the intersection point, because
     /// we're tracing from the camera!
     Vec3 pathtracingBRDF(const Vec2& textureCoords, const Ray& incomingRay, const Ray& outgoingRay, const Vec3& surfaceNormal) const {
-        // for now, just diffuse 
-        return diffuseColorAtTextureCoords(textureCoords) * kd;
+
+        // TODO better way of chosing, probably just separate out into different structs
+        constexpr enum {
+            LAMBERTIAN,
+            DISNEY
+        } brdfType = DISNEY;
+
+        if constexpr(brdfType == LAMBERTIAN){
+            return diffuseColorAtTextureCoords(textureCoords) * baseColorIntensity;
+        }else if constexpr(brdfType == DISNEY){
+    // Get the base color from texture or constant
+    Vec3 diffuseBaseColor = diffuseColorAtTextureCoords(textureCoords);
+
+    // Calculate various directions
+    Vec3 N = surfaceNormal.normalized();
+    // Fixed direction calculations - outgoing ray direction should be negated
+    Vec3 V = (-outgoingRay.direction).normalized();  // View direction
+    Vec3 L = incomingRay.direction.normalized();     // Light direction (removed negation)
+    
+    // Early exit if light is below surface
+    if (N.dot(L) <= 0.0f || N.dot(V) <= 0.0f) {
+        return Vec3(0.0f);
+    }
+    
+    Vec3 H = (L + V).normalized();                   // Half vector
+
+    // Create tangent space basis vectors with epsilon checks
+    Vec3 Y(0.);
+    if (std::abs(N.x) > std::abs(N.z)) {
+        float length = std::sqrt(N.x * N.x + N.y * N.y);
+        if (length > epsilon) {
+            Y = Vec3(-N.y / length, N.x / length, 0.0f);
+        } else {
+            Y = Vec3(1.0f, 0.0f, 0.0f);
+        }
+    } else {
+        float length = std::sqrt(N.y * N.y + N.z * N.z);
+        if (length > epsilon) {
+            Y = Vec3(0.0f, -N.z / length, N.y / length);
+        } else {
+            Y = Vec3(0.0f, 1.0f, 0.0f);
+        }
+    }
+    Vec3 X = Y.cross(N);
+
+    // Useful dot products with clamping
+    float NdotL = std::clamp(N.dot(L), epsilon, 1.0f);
+    float NdotV = std::clamp(N.dot(V), epsilon, 1.0f);
+    float NdotH = std::clamp(N.dot(H), epsilon, 1.0f);
+    float LdotH = std::clamp(L.dot(H), epsilon, 1.0f);
+    float VdotH = std::clamp(V.dot(H), epsilon, 1.0f);
+
+    // Anisotropic calculations with clamping
+    float XdotH = std::clamp(X.dot(H), -1.0f + epsilon, 1.0f - epsilon);
+    float YdotH = std::clamp(Y.dot(H), -1.0f + epsilon, 1.0f - epsilon);
+    float XdotV = std::clamp(X.dot(V), -1.0f + epsilon, 1.0f - epsilon);
+    float YdotV = std::clamp(Y.dot(V), -1.0f + epsilon, 1.0f - epsilon);
+    float XdotL = std::clamp(X.dot(L), -1.0f + epsilon, 1.0f - epsilon);
+    float YdotL = std::clamp(Y.dot(L), -1.0f + epsilon, 1.0f - epsilon);
+
+    // Utility functions with additional safety
+    auto sqr = [](float x) { return x * x; };
+    auto safe_sqrt = [](float x) { return std::sqrt(std::max(epsilon, x)); };
+    auto lerp = [](const auto& x, const auto& y, float a) {
+        return x * (1.0f - a) + y * a;
+    };
+
+    // Luminance approximation with safety check
+    auto luminance = [](const Vec3& color) {
+        return std::max(epsilon, color.dot(Vec3(0.3f, 0.6f, 0.1f)));
+    };
+
+    // Modified GTR1 Distribution (for clearcoat)
+    auto GTR1 = [](float NdotH, float a) {
+        if (a >= 1.0f) return (float_T) (1. / M_PI);
+        float_T a2 = std::max(epsilon, a * a);
+        float_T t = 1. + (a2 - 1.) * NdotH * NdotH;
+        return std::max(epsilon, (float_T) ((a2 - 1.0f) / (M_PI * std::max(epsilon, std::log(a2)) * std::max(epsilon, t))));
+    };
+
+    // Modified GTR2_aniso Distribution
+    auto GTR2_aniso = [&sqr](float NdotH, float HdotX, float HdotY, float ax, float ay) {
+        float denominator = sqr(HdotX/std::max(epsilon, ax)) + sqr(HdotY/std::max(epsilon, ay)) + sqr(NdotH);
+        return 1.0f / (M_PI * std::max(epsilon, ax * ay * sqr(denominator)));
+    };
+
+    // Modified Smith geometric shadowing
+    auto smithG_GGX_aniso = [&](float NdotV, float VdotX, float VdotY, float ax, float ay) {
+        float denominator = NdotV + safe_sqrt(sqr(VdotX*ax) + sqr(VdotY*ay) + sqr(NdotV));
+        return 1.0f / std::max(epsilon, denominator);
+    };
+
+    // Smith geometric shadowing lambda
+    auto smithG = [&safe_sqrt](float NdotV, float alphaG) {
+        float a = std::max(epsilon, alphaG * alphaG);
+        float b = std::max(epsilon, NdotV * NdotV);
+        return 1.0f / std::max(epsilon, NdotV + safe_sqrt(a + b - a * b));
+    };
+
+    // Calculate specular tint with safety
+    Vec3 tint = (luminance(diffuseBaseColor) > epsilon) ? 
+                diffuseBaseColor / luminance(diffuseBaseColor) : 
+                Vec3(1.0f);
+
+    // Rest of the calculations with additional safety checks
+    Vec3 specularColor = (Vec3(1.0f) * 0.08f * specular).lerp(tint, specularTint).lerp(diffuseBaseColor, metallic);
+    Vec3 F0 = specularColor;
+
+    // Diffuse Component
+    float FL = std::pow(std::max(epsilon, 1.0f - NdotL), 5.0f);
+    float FV = std::pow(std::max(epsilon, 1.0f - NdotV), 5.0f);
+    float Rr = 2.0f * roughness * sqr(LdotH);
+    float Fd90 = 0.5f + 2.0f * roughness * sqr(LdotH);
+    float Fd = lerp(1.0f, Fd90, FL) * lerp(1.0f, Fd90, FV);
+
+    float Fss90 = Rr;
+    float Fss = lerp(1.0f, Fss90, FL) * lerp(1.0f, Fss90, FV);
+    float ss = 1.25f * (Fss * (1.0f / std::max(epsilon, NdotL + NdotV) - 0.5f) + 0.5f);
+
+    Vec3 diffuse = (1.0f / M_PI) * lerp(Fd, ss, subsurface) * diffuseBaseColor * (1.0f - metallic);
+
+    // Specular Component
+    float aspect = safe_sqrt(1.0f - anisotropic * 0.9f);
+    float ax = std::max(0.001f, sqr(roughness) / std::max(epsilon, aspect));
+    float ay = std::max(0.001f, sqr(roughness) * aspect);
+
+    Vec3 F = F0 + (Vec3(1.0f) - F0) * std::pow(std::max(epsilon, 1.0f - LdotH), 5.0f);
+    float D = GTR2_aniso(NdotH, XdotH, YdotH, ax, ay);
+    float Gs = smithG_GGX_aniso(NdotL, XdotL, YdotL, ax, ay);
+    float Gv = smithG_GGX_aniso(NdotV, XdotV, YdotV, ax, ay);
+    Vec3 spec = Gs * Gv * F * D;
+
+    // Sheen Layer
+    Vec3 sheenColor = lerp(Vec3(1.0f), tint, sheenTint);
+    float FH = std::pow(std::max(epsilon, 1.0f - LdotH), 5.0f);
+    Vec3 Fsheen = FH * sheen * sheenColor;
+
+    // Clearcoat Layer
+    float Dr = GTR1(NdotH, lerp(0.1f, 0.001f, clearcoatGloss));
+    float Fr = lerp(0.04f, 1.0f, FH);
+    float Gr = smithG(NdotL, 0.25f) * smithG(NdotV, 0.25f);
+    Vec3 clearcoatLayer = Vec3(0.25f * clearcoat * Gr * Fr * Dr);
+
+    // Final combination with safety clamp
+    Vec3 result = diffuse + spec + Fsheen + clearcoatLayer;
+    return result;
+        }
     }
 
 };
 
-//struct Material{
-//    // TODO this would actually be brdfs in the future
-//    std::variant<PhongMaterial, int> material;
-//
-//    Material(std::variant<PhongMaterial, int> material)
-//        : material(material){ }
-//};
+struct Material {
+    std::variant<PhongMaterial, PrincipledBRDFMaterial> variant;
+
+    const PhongMaterial& assumePhongMaterial() const {
+        assert(std::holds_alternative<PhongMaterial>(variant) && "Material is not a Phong material");
+        return std::get<PhongMaterial>(variant);
+    }
+
+    const PrincipledBRDFMaterial& assumePrincipledBRDFMaterial() const {
+        assert(std::holds_alternative<PrincipledBRDFMaterial>(variant) && "Material is not a BRDF material");
+        return std::get<PrincipledBRDFMaterial>(variant);
+    }
+
+    bool hasTexture() const {
+        return std::visit([&](auto&& object){
+            return object.texture.has_value();
+        }, variant);
+    }
+};
 
 struct Intersection{
     // ray that caused the intersection
@@ -541,12 +766,14 @@ struct Intersection{
     // TODO instead of storing the intersection point, could store the distance along the ray
     Vec3 point;
     Vec3 surfaceNormal;
-    const PhongMaterial* material;
+    const Material* material;
     Vec2 textureCoords;
 
-    Intersection(const Ray* incomingray, Vec3 point, Vec3 surfaceNormal, const PhongMaterial* material, Vec2 textureCoords)
+    Intersection(const Ray* incomingray, Vec3 point, Vec3 surfaceNormal, const Material* material, Vec2 textureCoords)
         : incomingRay(incomingray), point(point), surfaceNormal(surfaceNormal), material(material), textureCoords(textureCoords){
         assert(surfaceNormal == surfaceNormal.normalized() && "Surface normal must be normalized");
+        assert(incomingRay && "Incoming ray must not be null");
+        assert(material && "Material must not be null");
     }
 
     float_T distance() const{
@@ -556,21 +783,24 @@ struct Intersection{
 
 };
 
-inline PhongMaterial givenMaterialOrDefault(std::optional<PhongMaterial> material){
-    if(material.has_value())
-        return std::move(material.value());
-    else
-        // default material, because the json format allows for no material to be specified
-        return PhongMaterial(Vec3(1,1,1), Vec3(1,1,1), 0.5, 0.5, 32, 0.0, 0.0, std::nullopt, std::nullopt);
-}
+const PhongMaterial defaultPhongMaterial = PhongMaterial(Vec3(1,1,1), Vec3(1,1,1), 0.5, 0.5, 32, 0.0, 0.0, std::nullopt);
+const PrincipledBRDFMaterial defaultPrincipledBRDFMaterial = PrincipledBRDFMaterial(Vec3(1.), std::nullopt, 0., 1., 0., 0., 0.5, 1., 0., 1., 0., 0., 0., 0.);
+
+//inline Material givenMaterialOrDefault(std::optional<Material> material){
+//    if(material.has_value())
+//        return std::move(material.value());
+//    else
+//        // default material, because the json format allows for no material to be specified
+//        return
+//}
 
 struct Sphere {
     Vec3 center;
     float_T radius;
-    PhongMaterial material;
+    Material material;
 
-    Sphere(Vec3 center, float_T radius, std::optional<PhongMaterial> material)
-        : center(center), radius(radius), material(givenMaterialOrDefault(std::move(material))){ }
+    Sphere(Vec3 center, float_T radius, Material material)
+        : center(center), radius(radius), material(std::move(material)){ }
 
     std::optional<Intersection> intersect(const Ray& ray) const {
         // mostly generated by chatgpt
@@ -633,10 +863,10 @@ struct Cylinder {
     float_T radius;
     float_T eachSideHeight;
     Vec3 axis;
-    PhongMaterial material;
+    Material material;
 
-    Cylinder(Vec3 center, float_T radius, float_T height, Vec3 axis, std::optional<PhongMaterial> material)
-        : center(center), radius(radius), eachSideHeight(height), axis(axis), material(givenMaterialOrDefault(std::move(material))){ }
+    Cylinder(Vec3 center, float_T radius, float_T height, Vec3 axis, Material material)
+        : center(center), radius(radius), eachSideHeight(height), axis(axis), material(std::move(material)){ }
 
     std::optional<Intersection> intersect(const Ray& ray) const {
         // mostly generated by chatgpt
@@ -740,7 +970,7 @@ private:
 struct Triangle {
     Vec3 v0,v1,v2;
     // TODO could try deduplicating materials for triangle objects later on, for big meshes that all have the same material
-    PhongMaterial material;
+    Material material;
     // these are only valid if the material has a texture
     Vec2 texCoordv0, texCoordv1, texCoordv2;
 
@@ -748,8 +978,8 @@ struct Triangle {
 
     Vec3 normal = (v1-v0).cross(v2-v0).normalized();
 
-    Triangle(Vec3 v0, Vec3 v1, Vec3 v2, std::optional<PhongMaterial> material, Vec2 texCoordv0, Vec2 texCoordv1, Vec2 texCoordv2)
-        : v0(v0), v1(v1), v2(v2), material(givenMaterialOrDefault(std::move(material))), texCoordv0(texCoordv0), texCoordv1(texCoordv1), texCoordv2(texCoordv2){ }
+    Triangle(Vec3 v0, Vec3 v1, Vec3 v2, Material material, Vec2 texCoordv0, Vec2 texCoordv1, Vec2 texCoordv2)
+        : v0(v0), v1(v1), v2(v2), material(std::move(material)), texCoordv0(texCoordv0), texCoordv1(texCoordv1), texCoordv2(texCoordv2){ }
 
     Vec3 faceNormal() const{
         // TODO in the future, could interpolate this with the rest of the mesh
@@ -1052,8 +1282,8 @@ public:
 
         // here, we're just checking both boxes
         // TODO but we could check the least number of nodes by:
-        // a) checking the closer box first
-        // b) only checking the other box if the boxes overlap, or if the closer box has no intersection
+        // a checking the closer box first
+        // b only checking the other box if the boxes overlap, or if the closer box has no intersection
 
         auto leftIntersection = left->intersect(ray, objects);
         auto rightIntersection = right->intersect(ray, objects);
@@ -1165,6 +1395,12 @@ struct Scene{
 
     std::vector<PointLight> pointLights;
 
+    const PointLight& randomPointLight() const {
+        assert(!pointLights.empty() && "No point lights in scene");
+        // std::rand() % pointLights.size() literally triples render time, so use this instead
+        return pointLights[randomFloat() * pointLights.size()];
+    }
+
     std::vector<SceneObject> objects;
 
     struct {
@@ -1209,7 +1445,6 @@ struct Renderer{
 
     BVHNode bvh;
 
-
     Renderer(Scene&& scene, std::string_view outputFilePath)
         : scene(std::move(scene)),
           writer(outputFilePath, this->scene.camera->widthPixels, this->scene.camera->heightPixels),
@@ -1251,17 +1486,19 @@ struct Renderer{
 
     /// shades a single intersection point
     /// outputs an un-tonemapped color, not for immediate display
-    Vec3 blinnPhongShading(const Intersection& intersectionToShade, uint32_t bounces = 1, float_T currentIOR = 1.) {
+    Vec3 shadeBlinnPhong(const Intersection& intersectionToShade, uint32_t bounces = 1, float_T currentIOR = 1.) {
         if (bounces > scene.nBounces)
             return Vec3(0.);
 
+        const PhongMaterial& material = intersectionToShade.material->assumePhongMaterial();
+
         // material properties
-        Vec3 diffuse = intersectionToShade.material->diffuseColorAtTextureCoords(intersectionToShade.textureCoords);
+        Vec3 diffuse = material.diffuseColorAtTextureCoords(intersectionToShade.textureCoords);
         float_T ambientIntensity = 0.25;
         Vec3 ambient = diffuse * ambientIntensity;
-        Vec3 specular = intersectionToShade.material->specularColor;
-        float_T ks = intersectionToShade.material->ks;
-        float_T specularExponentShinyness = intersectionToShade.material->specularExponent;
+        Vec3 specular = material.specularColor;
+        float_T ks = material.ks;
+        float_T specularExponentShinyness = material.specularExponent;
 
         auto calculateSpecularHighlights = [&]() -> Vec3 {
             Vec3 specularSum(0.);
@@ -1281,11 +1518,11 @@ struct Renderer{
         };
 
         // Handle transparent (refractive) materials differently
-        if (intersectionToShade.material->refractiveIndex.has_value()) {
+        if (material.refractiveIndex.has_value()) {
             // make sure to still have specular highlights on transparent objects
             // these would be weighted by the objects transmissiveness, but as that doesnt exist, just add them for now
             Vec3 finalColor = calculateSpecularHighlights();
-            float_T materialIOR = *intersectionToShade.material->refractiveIndex;
+            float_T materialIOR = *material.refractiveIndex;
 
             bool entering = intersectionToShade.incomingRay->direction.dot(intersectionToShade.surfaceNormal) < 0;
             Vec3 normal = entering ? intersectionToShade.surfaceNormal : -intersectionToShade.surfaceNormal;
@@ -1305,7 +1542,7 @@ struct Renderer{
 
                 Vec3 refractedColor = scene.backgroundColor;
                 if (auto refractedIntersection = traceRayToClosestSceneIntersection(refractedRay)) {
-                    refractedColor = blinnPhongShading(*refractedIntersection, bounces + 1, nextIOR);
+                    refractedColor = shadeBlinnPhong(*refractedIntersection, bounces + 1, nextIOR);
                 }
 
                 // tint the refraction by the diffuse color, to be able to make e.g. red glass
@@ -1328,7 +1565,7 @@ struct Renderer{
         // Ambient and diffuse
         color += ambient;  // ambient
 
-        float_T kd = intersectionToShade.material->kd;
+        float_T kd = material.kd;
         for(const auto& light: scene.pointLights) {
             Vec3 L = (light.position - intersectionToShade.point).normalized();
             if(isInShadow(intersectionToShade, light, L))
@@ -1344,7 +1581,7 @@ struct Renderer{
 
         // Handle reflection if material is reflective
         // TODO could do fresnel here and for refractivity
-        if(intersectionToShade.material->reflectivity.has_value()) {
+        if(material.reflectivity.has_value()) {
             Vec3 reflectedColor = scene.backgroundColor;
             Vec3 reflectionDir = intersectionToShade.incomingRay->direction - 
                 intersectionToShade.surfaceNormal * 2 * 
@@ -1352,10 +1589,10 @@ struct Renderer{
             Ray reflectionRay(intersectionToShade.point + reflectionDir * (10 * epsilon), reflectionDir);
 
             if (auto reflectionIntersection = traceRayToClosestSceneIntersection(reflectionRay)) {
-                reflectedColor = blinnPhongShading(*reflectionIntersection, bounces + 1, currentIOR);
+                reflectedColor = shadeBlinnPhong(*reflectionIntersection, bounces + 1, currentIOR);
             }
 
-            color = color.lerp(reflectedColor, *intersectionToShade.material->reflectivity);
+            color = color.lerp(reflectedColor, *material.reflectivity);
         }
 
         return color;
@@ -1458,7 +1695,7 @@ struct Renderer{
                         if constexpr (mode == RenderMode::BINARY){
                             pixelColor = Vec3(1.0);
                         }else if constexpr (mode == RenderMode::PHONG){
-                            pixelColor = blinnPhongShading(*closestIntersection);
+                            pixelColor = shadeBlinnPhong(*closestIntersection);
                         }else{
                             static_assert(false, "Invalid render mode");
                         }
@@ -1576,21 +1813,25 @@ struct Renderer{
         if(bounces > scene.nBounces)
             return Vec3(scene.backgroundColor);
 
-        const Vec3 emission = intersection.material->emissionColor.value_or(Vec3(0.));
+        const PrincipledBRDFMaterial& material = intersection.material->assumePrincipledBRDFMaterial();
 
-        // start with emission color
-        Vec3 overallColor = emission;
+        // start with emission
+        Vec3 overallColor = material.emissionColor(intersection.textureCoords);
 
-        // add sample brdf from all directions
-        { // additional scope to make clear that variables here aren't live anymore afterwards
+        // TODO weight specular vs non-specular bounce via probability
 
+        auto contributionFromHemisphereAroundDirection = [this, &intersection, &material, bounces] [[nodiscard]] (const Vec3& direction, bool doSample){
             // optionally sample multiple times
             // not necessary because of monte carlo - we're sampling each pixel multiple times anyway
             // but this gives greater control: you're free to introduce exponential time complexity if you like :)
             Vec3 accumulatedContributions(0.);
             for(unsigned hemisphereSampleNum = 0; hemisphereSampleNum < scene.pathtracingSamples.hemisphereSamplesPerBounce; hemisphereSampleNum++){
 
-                const Vec3 hemisphereSample = sampleHemisphere<samplingTechnique>(intersection.surfaceNormal);
+                Vec3 hemisphereSample(0.);
+                if(doSample)
+                    hemisphereSample = sampleHemisphere<samplingTechnique>(direction);
+                else
+                    hemisphereSample = direction;
 
                 Ray incomingRay(intersection.point + hemisphereSample * (10 * epsilon), hemisphereSample);
 
@@ -1599,37 +1840,57 @@ struct Renderer{
                     incomingColor = shadePathtraced<samplingTechnique>(*incomingIntersection, bounces + 1);
                 }
 
-                const auto mainBounceBRDF = intersection.material->pathtracingBRDF(intersection.textureCoords, incomingRay, *intersection.incomingRay, intersection.surfaceNormal);
+                const auto mainBounceBRDF = material.pathtracingBRDF(intersection.textureCoords, incomingRay, *intersection.incomingRay, intersection.surfaceNormal);
 
-                if constexpr(samplingTechnique == COSINE_WEIGHTED_HEMISPHERE){
-                    accumulatedContributions += emission + incomingColor * mainBounceBRDF;
-                }else if(samplingTechnique == UNIFORM){
-                    // weight by the cosine of the angle between the normal and the incoming ray, this weighting is already present in the cosine weighted hemisphere sampling
-                    // the 2. factor comes from dividing by the PDF, which is 1/2pi for uniform sampling. The pi in the diffuse BRDF cancels out with the pi in the PDF
-                    accumulatedContributions += 2. * incomingColor * mainBounceBRDF * intersection.surfaceNormal.dot(hemisphereSample);
+                if(doSample){
+                    if constexpr(samplingTechnique == COSINE_WEIGHTED_HEMISPHERE){
+                        accumulatedContributions += incomingColor * mainBounceBRDF;
+                    }else if(samplingTechnique == UNIFORM){
+                        // weight by the cosine of the angle between the normal and the incoming ray, this weighting is already present in the cosine weighted hemisphere sampling
+                        // the 2. factor comes from dividing by the PDF, which is 1/2pi for uniform sampling.
+                        // TODO pi in the diffuse brdf cancelling out sometimes, but not every time - regard this?
+                        accumulatedContributions += 2. * incomingColor * mainBounceBRDF * intersection.surfaceNormal.dot(hemisphereSample);
+                    }
+                }else{
+                    accumulatedContributions += incomingColor * mainBounceBRDF * intersection.surfaceNormal.dot(hemisphereSample);
                 }
             }
-            overallColor += accumulatedContributions / scene.pathtracingSamples.hemisphereSamplesPerBounce;
+            return accumulatedContributions / scene.pathtracingSamples.hemisphereSamplesPerBounce;
+        };
+
+        // now sample the brdf
+        // to choose whether to sample in a diffuse way (around the normal) or in a specular way (around the reflection direction), use material roughness
+        auto diffuseProbability = std::max((float_T)0.001, material.roughness);
+        if(randomFloat() < diffuseProbability){
+            // diffuse lighting
+            auto contribution = contributionFromHemisphereAroundDirection(intersection.surfaceNormal, true);
+            overallColor += contribution/diffuseProbability;
+        }else{
+            Vec3 reflectedDir = intersection.incomingRay->direction - 
+                intersection.surfaceNormal * 2 * 
+                (intersection.incomingRay->direction.dot(intersection.surfaceNormal));
+            auto contribution = contributionFromHemisphereAroundDirection(reflectedDir, false);
+            overallColor += contribution/(1-diffuseProbability);
         }
-        
-        {
+
+        if(!scene.pointLights.empty()){
             // sample point lights explicitly, because they are infinitessimally small, they can never be hit by a random ray
             // luckily, the pdf of the dirac delta distribution representing these cancels out with the light intensity of the point light itself, so we can simply add it, if the light is not in shadow
-            for(const auto& light : scene.pointLights){
+            // we could just sample all point lights for every bounce, but thats a bit wasteful again for the later bounces
+            // -> randomly pick one, then compensate for that choice by multiplying with the number of point lights
+            const auto& light = scene.randomPointLight();
 
+            // optionally sample each light source multiple times
+            // not strictly necessary because of monte carlo - we're sampling each pixel multiple times anyway
+            // but this gives greater control, although it should be 1 in most cases
+            Vec3 accumulatedContributions(0.);
 
-                // optionally sample each light source multiple times
-                // not strictly necessary because of monte carlo - we're sampling each pixel multiple times anyway
-                // but this gives greater control, although it should be 1 in most cases
-                Vec3 accumulatedContributions(0.);
+            for(unsigned lightSampleNum = 0; lightSampleNum < scene.pathtracingSamples.pointLightsamplesPerBounce; lightSampleNum++){
+                // permute the origin randomly if the light has some amount of softness
+                Vec3 intersectionOriginPlusJitter = intersection.point + Vec3(randomFloat() - 0.5, randomFloat() - 0.5, randomFloat() - 0.5) * light.shadowSoftness;
 
-                for(unsigned lightSampleNum = 0; lightSampleNum < scene.pathtracingSamples.pointLightsamplesPerBounce; lightSampleNum++){
-                    // permute the origin randomly if the light has some amount of softness
-                    // TODO hm, could sort of also do this for phong? but would require multiple samples per pixel, that defeats the purpose of a single ray per pixel raytracer
-                    Vec3 intersectionOriginPlusJitter = intersection.point + Vec3(randomFloat() - 0.5, randomFloat() - 0.5, randomFloat() - 0.5) * light.shadowSoftness;
-
-                    // TODO hmm, this would be the more accurate version, because we dont want to just sample in an even sphere around the intersection point, just on the surface
-                    // this does reduce noise, but it introduces strange artifacts for triangle meshes
+                // TODO hmm, this would be the more accurate version, because we dont want to just sample in an even sphere around the intersection point, just on the surface
+                // this does reduce noise, but it introduces strange artifacts for triangle meshes
 //                    Vec3 tangent(0.), bitangent(0.);
 //if (std::abs(intersection.surfaceNormal.x) < std::abs(intersection.surfaceNormal.y)) {
 //    tangent = Vec3(0, intersection.surfaceNormal.z, -intersection.surfaceNormal.y).normalized();
@@ -1646,26 +1907,28 @@ struct Renderer{
 //
 //// Apply offset in tangent space
 //Vec3 intersectionOriginPlusJitter = intersection.point +
-    //(tangent * x + bitangent * y);
+//(tangent * x + bitangent * y);
 
-                    Vec3 L = (light.position - intersectionOriginPlusJitter).normalized();
-                    Vec3 shadowRayOrigin = intersectionOriginPlusJitter + L * (100 * epsilon);
-                    
-                    // TODO could sample the same light source multiple times here, maybe that's required? sounds a bit like it
+                Vec3 L = (light.position - intersectionOriginPlusJitter).normalized();
+                Vec3 shadowRayOrigin = intersectionOriginPlusJitter + L * (100 * epsilon);
+                
+                Ray shadowRay(shadowRayOrigin, L);
 
-                    Ray shadowRay(shadowRayOrigin, L);
+                if(isInShadow(intersection, light, shadowRay))
+                    continue;
 
-                    if(isInShadow(intersection, light, shadowRay))
-                        continue;
-
-                    Vec3 brdf = intersection.material->pathtracingBRDF(intersection.textureCoords, shadowRay, *intersection.incomingRay, intersection.surfaceNormal);
-                    // weight the contribution by the angle between the normal and the light ray
-                    float_T weight = std::max(intersection.surfaceNormal.dot(L), (float_T) 0.);
-                    accumulatedContributions += brdf * weight * light.intensityPerColor;
-                }
-
-                overallColor += accumulatedContributions / scene.pathtracingSamples.pointLightsamplesPerBounce;
+                Vec3 brdf = material.pathtracingBRDF(intersection.textureCoords, shadowRay, *intersection.incomingRay, intersection.surfaceNormal);
+                // weight the contribution by the angle between the normal and the light ray
+                float_T weight = std::max(intersection.surfaceNormal.dot(L), (float_T) 0.);
+                accumulatedContributions += brdf * weight * light.intensityPerColor;
             }
+
+            // compensate for only sampling one light
+            accumulatedContributions *= scene.pointLights.size();
+            // compensate for the number of samples
+            accumulatedContributions /= scene.pathtracingSamples.pointLightsamplesPerBounce;
+
+            overallColor += accumulatedContributions;
         }
 
         return overallColor;

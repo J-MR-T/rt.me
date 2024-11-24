@@ -137,11 +137,28 @@ Scene jsonFileToScene(std::string_view path){
         std::exit(EXIT_FAILURE);
     };
 
-    auto getOrFail = [&fail](const auto& j, const auto& key){
-        if(!j.contains(key))
-            // TODO add "missing/no"
-            fail(key);
-        return j[key];
+    /// gets a value from the json object
+    /// if more than one key is specified, these keys are aliases, and only *exactly* one of them must be present
+    auto getOrFail = [&fail](const auto& j, const auto&... keys){
+        unsigned numContained = ((unsigned) j.contains(keys) + ...);
+
+        if(numContained == 0)
+            fail("exactly one of " + ((std::string) keys + ... + "/") + " must be present. Object: " + j.dump());
+        else if(numContained > 1)
+            fail("ambiguous keys, only one of " + ((std::string) keys + ... + "/") + " must be present. Object: " + j.dump());
+
+        // annoying template magic to get the one that is contained
+        auto findContained = [&j](this auto& findContained, const auto& key, const auto&... remainingKeys){
+            if(j.contains(key))
+                return j[key];
+
+            if constexpr(sizeof...(remainingKeys) > 0)
+                return findContained(std::forward<decltype(remainingKeys)>(remainingKeys)...);
+            else
+                std::unreachable();
+        };
+
+        return findContained(std::forward<decltype(keys)>(keys)...);
     };
 
     auto getOrElse = []<typename T>(const auto& j, const auto& key, const T& otherwise) -> T {
@@ -217,32 +234,32 @@ Scene jsonFileToScene(std::string_view path){
             jsonToVec3(getOrFail(cameraJ, "position")),
             jsonToVec3(getOrFail(cameraJ, "lookAt")),
             jsonToVec3(getOrFail(cameraJ, "upVector")),
-            (float_t) getOrFail(cameraJ,  "fov"),
-            (float_t) getOrFail(cameraJ,  "width"),
-            (float_t) getOrFail(cameraJ,  "height"),
-            (float_t) getOrFail(cameraJ,  "exposure")
+            (float_T) getOrFail(cameraJ,  "fov"),
+            (float_T) getOrFail(cameraJ,  "width"),
+            (float_T) getOrFail(cameraJ,  "height"),
+            (float_T) getOrFail(cameraJ,  "exposure")
         );
     }else if(cameraType == "orthographic"){
         camera = std::make_unique<OrthographicCamera>(
             jsonToVec3(getOrFail(cameraJ, "position")),
             jsonToVec3(getOrFail(cameraJ, "lookAt")),
             jsonToVec3(getOrFail(cameraJ, "upVector")),
-            (float_t) getOrFail(cameraJ,  "width"),
-            (float_t) getOrFail(cameraJ,  "height"),
-            (float_t) getOrFail(cameraJ,  "exposure")
+            (float_T) getOrFail(cameraJ,  "width"),
+            (float_T) getOrFail(cameraJ,  "height"),
+            (float_T) getOrFail(cameraJ,  "exposure")
         );
     }else if(cameraType == "thinlens"){
         camera = std::make_unique<SimplifiedThinLensCamera>(
             jsonToVec3(getOrFail(cameraJ, "position")),
             jsonToVec3(getOrFail(cameraJ, "lookAt")),
             jsonToVec3(getOrFail(cameraJ, "upVector")),
-            (float_t) getOrFail(cameraJ,  "fov"),
-            (float_t) getOrFail(cameraJ,  "width"),
-            (float_t) getOrFail(cameraJ,  "height"),
-            (float_t) getOrFail(cameraJ,  "exposure"),
-            (float_t) getOrFail(cameraJ,  "fstop"),
-            (float_t) getOrFail(cameraJ,  "focalLength"),
-            (float_t) getOrFail(cameraJ,  "focusDistance")
+            (float_T) getOrFail(cameraJ,  "fov"),
+            (float_T) getOrFail(cameraJ,  "width"),
+            (float_T) getOrFail(cameraJ,  "height"),
+            (float_T) getOrFail(cameraJ,  "exposure"),
+            (float_T) getOrFail(cameraJ,  "fstop"),
+            (float_T) getOrFail(cameraJ,  "focalLength"),
+            (float_T) getOrFail(cameraJ,  "focusDistance")
         );
     }
 
@@ -270,19 +287,7 @@ Scene jsonFileToScene(std::string_view path){
         }
     }
 
-    // material
-
-    auto jsonToMaterial = [&](const auto& j) -> std::optional<PhongMaterial>{
-        std::optional<float_t> reflectivity = getOrFail(j, "reflectivity");
-        if(!getOrFail(j, "isreflective"))
-            reflectivity = std::nullopt;
-
-        std::optional<float_t> refractiveIndex = getOrFail(j, "refractiveindex");
-        if(!getOrFail(j, "isrefractive"))
-            refractiveIndex = std::nullopt;
-
-
-        // textures
+    auto jsonTryGetTexture = [&](const auto& j) {
         std::optional<std::shared_ptr<Texture>> texture = std::nullopt;
         if(j.contains("texture")){
             std::string texturePath = getOrFail(j, "texture");
@@ -291,17 +296,78 @@ Scene jsonFileToScene(std::string_view path){
             else
                 texture = textures[texturePath] = std::make_shared<Texture>(readPPMTexture(texturePath));
         }
+        return texture;
+    };
+
+
+    // material
+
+    auto jsonToPhongMaterial = [&](const auto& j) -> std::optional<PhongMaterial>{
+        // warn if (some) keys are present that are specific to BRDF materials
+        if(j.contains("emissive") || j.contains("emissiveness") || j.contains("emission"))
+            std::println(stderr, "Warning: Phong materials don't support emissive parameters - will be ignored");
+
+        std::optional<float_T> reflectivity = getOrFail(j, "reflectivity");
+        if(!getOrFail(j, "isreflective"))
+            reflectivity = std::nullopt;
+
+        std::optional<float_T> refractiveIndex = getOrFail(j, "refractiveindex");
+        if(!getOrFail(j, "isrefractive"))
+            refractiveIndex = std::nullopt;
+
+        // textures
+        std::optional<std::shared_ptr<Texture>> texture = jsonTryGetTexture(j);
 
         return PhongMaterial(
             jsonToVec3(getOrFail(j, "diffusecolor")),
             jsonToVec3(getOrFail(j, "specularcolor")),
-            (float_t) getOrFail(j,  "ks"),
-            (float_t) getOrFail(j,  "kd"),
+            (float_T) getOrFail(j,  "ks"),
+            (float_T) getOrFail(j,  "kd"),
             (uint64_t) getOrFail(j, "specularexponent"),
             reflectivity,
             refractiveIndex,
-            getOrElse(j, "emissioncolor", std::optional<json>()).and_then([&jsonToVec3](auto j){return std::optional(jsonToVec3(j));}),
             texture
+        );
+    };
+
+    auto jsonToBRDFMaterial = [&](const auto& j) -> std::optional<PrincipledBRDFMaterial>{
+        // TODO use
+        //std::optional<float_T> reflectivity = getOrFail(j, "reflectivity");
+        //if(!getOrFail(j, "isreflective"))
+        //    reflectivity = std::nullopt;
+        //
+        //std::optional<float_T> refractiveIndex = getOrFail(j, "refractiveindex");
+        //if(!getOrFail(j, "isrefractive"))
+        //    refractiveIndex = std::nullopt;
+
+        // warn if (some) keys are present that are specific to phong materials
+        if(j.contains("specularcolor") || j.contains("specularexponent"))
+            std::println(stderr, "Warning: Principled BRDF materials don't support specularcolor, specularexponent parameters - will be ignored");
+
+        // textures
+        std::optional<std::shared_ptr<Texture>> texture = jsonTryGetTexture(j);
+
+        // try to maintain some compatibility with phong materials:
+        // - "basecolor" can also be "diffusecolor"
+        // - "basecolorintensity" can also be "kd"
+        // - "specular" can also be "ks"
+        // ...
+
+        return PrincipledBRDFMaterial(
+            jsonToVec3(getOrFail(j, "diffusecolor", "basecolor")),
+            texture,
+            (float_T) getOrElse(j,  "emissive", 0.),
+            (float_T) getOrFail(j,  "kd", "basecolorintensity"),
+            (float_T) getOrFail(j, "metallic", "metallicness"),
+            (float_T) getOrFail(j, "subsurface"),
+            (float_T) getOrFail(j,  "ks", "specular"),
+            (float_T) getOrFail(j, "roughness"),
+            (float_T) getOrFail(j, "speculartint"),
+            (float_T) getOrFail(j, "anisotropic"),
+            (float_T) getOrFail(j, "sheen"),
+            (float_T) getOrFail(j, "sheentint"),
+            (float_T) getOrFail(j, "clearcoat"),
+            (float_T) getOrFail(j, "clearcoatgloss")
         );
     };
 
@@ -312,14 +378,24 @@ Scene jsonFileToScene(std::string_view path){
     for(auto& sceneObjectJ:sceneObjectsJ){
         std::string type = getOrFail(sceneObjectJ, "type");
         // get material if it exists, transform the json into a material
-        std::optional<PhongMaterial> material = getOrElse(sceneObjectJ, "material", std::optional<json>()).and_then(jsonToMaterial);
+        auto material = [&] -> Material{
+            if(renderMode == RenderMode::BINARY && sceneObjectJ.contains("material")){
+                fail("Binary mode doesn't support materials");
+            }else if(renderMode == RenderMode::PHONG){
+                PhongMaterial phongMaterial = getOrElse(sceneObjectJ, "material", std::optional<json>()).and_then(jsonToPhongMaterial).value_or(defaultPhongMaterial);
+                return Material(phongMaterial);
+            }else{
+                PrincipledBRDFMaterial principledBRDFMaterial = getOrElse(sceneObjectJ, "material", std::optional<json>()).and_then(jsonToBRDFMaterial).value_or(defaultPrincipledBRDFMaterial);
+                return Material(principledBRDFMaterial);
+            }
+        }();
 
         if(type == "triangle"){
             // spheres and cylinders have textures mapped automatically, triangles need to be mapped manually
             Vec2 texCoordv0;
             Vec2 texCoordv1;
             Vec2 texCoordv2;
-            if(material.has_value() && material->texture.has_value()){
+            if(sceneObjectJ.contains("material") && material.hasTexture()){
                 // get triangle text coords
                 auto materialJ = sceneObjectJ["material"];
                 texCoordv0 = jsonToVec2(getOrFail(materialJ, "txv0"));
@@ -338,14 +414,14 @@ Scene jsonFileToScene(std::string_view path){
         }else if(type == "sphere"){
             sceneObjects.emplace_back(Sphere(
                 jsonToVec3(getOrFail(sceneObjectJ, "center")),
-                (float_t) getOrFail(sceneObjectJ, "radius"),
+                (float_T) getOrFail(sceneObjectJ, "radius"),
                 std::move(material)
             ));
         }else if(type == "cylinder"){
             sceneObjects.emplace_back(Cylinder(
                 jsonToVec3(getOrFail(sceneObjectJ, "center")),
-                (float_t) getOrFail(sceneObjectJ, "radius"),
-                (float_t) getOrFail(sceneObjectJ, "height"),
+                (float_T) getOrFail(sceneObjectJ, "radius"),
+                (float_T) getOrFail(sceneObjectJ, "height"),
                 jsonToVec3(getOrFail(sceneObjectJ, "axis")),
                 std::move(material)
             ));
@@ -391,7 +467,7 @@ int main(int argc, char *argv[]) {
 
     MEASURE_TIME_START(renderTime);
 
-    // "convert" render mode to constexpr
+    // "convert" render mode to constexpr - unfortunate boiler plate, but this is the only way to template this
     if(renderer.scene.renderMode == RenderMode::BINARY)
         renderer.render<RenderMode::BINARY>();
     else if(renderer.scene.renderMode == RenderMode::PHONG)
