@@ -281,13 +281,14 @@ public:
 };
 
 
+/// A ray, represented by its origin and direction
 struct Ray{
     Vec3 origin;
     Vec3 direction;
     Vec3 invDirection;
 
-    // TODO maybe make some kind of "prevent self intersection" constructor to dedupliate some code
-
+    // constructors are not allowed for readability, createXyz functions should be used instead
+private:
     /// assumes that the direction is normalized!
     Ray(Vec3 origin, Vec3 direction, Vec3 invDirection)
         : origin(origin), direction(direction), invDirection(invDirection){
@@ -297,12 +298,24 @@ struct Ray{
 
     Ray(Vec3 origin, Vec3 direction) : Ray(origin, direction, 1./direction){}
 
+public:
+
+    /// assumes that the direction is normalized!
+    static Ray createExact(Vec3 origin, Vec3 direction){
+        return Ray(origin, direction);
+    }
+
+    ///  TODO doc
+    /// Slightly offsets the ray from its origin in the direction to avoid self intersections
+    /// with the object it might have originated from
+    /// assumes that the direction is normalized!
+    /// - epsilonFactor: how much the ray is offset from the origin in terms of the epsilon - the default of 10 is ususally fine
+    static Ray createWithOffset(Vec3 origin, Vec3 direction, float_T epsilonFactor = 10.){
+        return Ray(origin + direction * epsilonFactor * epsilon, direction);
+    }
 };
 
-// TODO could use CRTP later, but normal dynamic dispatch is fine for now
-
 struct Camera{
-    // TODO think about these
     Vec3 position;
     Vec3 direction;
     Vec3 down; // we're using a right-handed coordinate system, as PPM has (0,0) in the top left, so we want to go down not up
@@ -311,7 +324,7 @@ struct Camera{
     uint64_t widthPixels;
     float_T height;
     uint64_t heightPixels;
-    float_T exposure; // TODO use
+    float_T exposure;
 
     virtual ~Camera() = default; 
 
@@ -373,7 +386,7 @@ struct OrthographicCamera : public Camera{
 
     virtual Ray generateRay(Vec2 pixelInScreenSpace) const override{
         // for an orthographic camera, basically just shoot a ray in the look direction, through the pixel center
-        return Ray(
+        return Ray::createExact(
             pixelInWorldSpace(pixelInScreenSpace),
             direction
         );
@@ -404,7 +417,7 @@ struct PinholePerspectiveCamera : public Camera{
         // Calculate ray direction from camera position to point on image plane
         Vec3 rayDirection = (pointOnImagePlane - position).normalized();
 
-        return Ray(position, rayDirection);
+        return Ray::createExact(position, rayDirection);
     }
 };
 
@@ -467,7 +480,7 @@ struct SimplifiedThinLensCamera : public Camera {
         // Calculate the new ray direction from the lens point to the focal point
         Vec3 newRayDirection = (focalPoint - lensPoint).normalized();
 
-        return Ray(lensPoint, newRayDirection);
+        return Ray::createExact(lensPoint, newRayDirection);
     }
 };
 
@@ -1672,9 +1685,7 @@ struct Renderer{
 
 
     bool isInShadow(const Intersection& intersection, const PointLight& light, const Vec3& L) {
-        Vec3 shadowRayOrigin = intersection.point + L * (100 * epsilon);
-        Ray shadowRay(shadowRayOrigin, L);
-
+        auto shadowRay = Ray::createWithOffset(intersection.point, L, 100.);
         return isInShadow(intersection, light, shadowRay);
     };
 
@@ -1737,7 +1748,7 @@ struct Renderer{
                 Vec3 refractedDir = etaRatio * intersectionToShade.incomingRay->direction + 
                     (etaRatio * cosTheta_i - cosTheta_t) * normal;
 
-                Ray refractedRay(intersectionToShade.point + refractedDir * (10 * epsilon), refractedDir);
+                auto refractedRay = Ray::createWithOffset(intersectionToShade.point, refractedDir);
                 // TODO refracting exiting being air doesnt really work I think, it should somehow be dependent on whether the intersection is inside the current intersected object or outside
                 float_T nextIOR = entering ? materialIOR : 1.;
 
@@ -1785,7 +1796,7 @@ struct Renderer{
         if(material.reflectivity.has_value()) {
             Vec3 reflectedColor = scene.backgroundColor;
             Vec3 reflectionDir = intersectionToShade.incomingRay->direction.reflect(intersectionToShade.surfaceNormal);
-            Ray reflectionRay(intersectionToShade.point + reflectionDir * (10 * epsilon), reflectionDir);
+            auto reflectionRay = Ray::createWithOffset(intersectionToShade.point, reflectionDir);
 
             if (auto reflectionIntersection = traceRayToClosestSceneIntersection(reflectionRay)) {
                 reflectedColor = shadeBlinnPhong(*reflectionIntersection, bounces + 1, currentIOR);
@@ -2074,10 +2085,7 @@ struct Renderer{
             actualSamplesTaken++;
 
             // Create and trace ray in sampled direction
-            Ray incomingRay(
-                    intersection.point + sample.direction * (10 * epsilon), 
-                    sample.direction
-                    );
+            auto incomingRay = Ray::createWithOffset(intersection.point, sample.direction);
 
             Vec3 incomingColor = scene.backgroundColor;
             if(auto incomingIntersection = traceRayToClosestSceneIntersection(incomingRay)) {
@@ -2093,7 +2101,6 @@ struct Renderer{
                     );
 
             float_T cosTheta = std::max(0.0f, N.dot(sample.direction));
-
 
             // Accumulate contribution
             // Note: cosine term is included in BRDF evaluation
@@ -2141,9 +2148,8 @@ struct Renderer{
                 //(tangent * x + bitangent * y);
 
                 Vec3 L = (light.position - intersectionOriginPlusJitter).normalized();
-                Vec3 shadowRayOrigin = intersectionOriginPlusJitter + L * (100 * epsilon);
 
-                Ray shadowRay(shadowRayOrigin, L);
+                auto shadowRay = Ray::createWithOffset(intersectionOriginPlusJitter, L);
 
                 if(isInShadow(intersection, light, shadowRay))
                     continue;
