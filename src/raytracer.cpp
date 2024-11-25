@@ -278,7 +278,7 @@ Scene jsonFileToScene(std::string_view path){
             if(shadowSoftness < 0)
                 fail("Shadow softness must be positive");
 
-            if(renderMode != RenderMode::PATHTRACE && renderMode != RenderMode::PATHTRACE_INCREMENTAL && shadowSoftness != 0.)
+            if(renderMode == RenderMode::PHONG && shadowSoftness != 0.)
                 fail("Shadow softness > 0 only supported in pathtracing mode");
 
             lights.emplace_back(position, intensityPerColor, shadowSoftness);

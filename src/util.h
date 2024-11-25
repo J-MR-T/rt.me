@@ -610,50 +610,72 @@ private:
         return (a2 - 1.0f) / (M_PI * std::log(a2) * t);
     }
 
-    //static float_T GTR2_aniso(float_T NdotH, float_T HdotX, float_T HdotY, float_T ax, float_T ay) {
-    //    float_T denominator = sqr(HdotX/ax) + sqr(HdotY/ay) + sqr(NdotH);
-    //    return 1.0f / (M_PI * ax * ay * sqr(denominator));
-    //}
-
-    //static float_T GTR2_aniso(float_T NdotH, float_T HdotX, float_T HdotY, float_T ax, float_T ay) {
-    //    float_T ax2 = ax * ax;
-    //    float_T ay2 = ay * ay;
-    //    float_T invDenom = HdotX * HdotX / ax2 + HdotY * HdotY / ay2 + NdotH * NdotH;
-    //    return 1.0f / (M_PI * ax * ay * invDenom * invDenom);
-    //}
-
-     // Helper for anisotropic calculations
+    // Helper for anisotropic calculations
     static void calculateAnisotropicParams(float_T roughness, float_T anisotropic,
                                          float_T& ax, float_T& ay) {
-        // Ensure roughness is non-zero
         roughness = std::max(0.001f, roughness);
         
-        // Calculate anisotropic roughness values
-        float_T aspect = std::sqrt(1.0f - 0.9f * anisotropic);
-        ax = roughness / aspect;
-        ay = roughness * aspect;
+        // Modify how anisotropic affects the aspect ratio
+        // Map anisotropic [0,1] to a more useful range for aspect ratio
+        float_T t = anisotropic * 0.9f;  // Keep maximum anisotropy slightly below 1
+        ax = std::max(0.001f, roughness * (1.0f + t));
+        ay = std::max(0.001f, roughness * (1.0f - t));
+    }
+
+    Vec3 sampleGGXVNDF(const Vec3& V, float_T roughness, const Vec3& X, const Vec3& Y, const Vec3& N) const {
+        float_T u1 = randomFloat();
+        float_T u2 = randomFloat();
+
+        // Calculate anisotropic roughness
+        float_T ax, ay;
+        calculateAnisotropicParams(roughness, anisotropic, ax, ay);
+
+        // Transform V to tangent space
+        Vec3 Vt = Vec3(V.dot(X), V.dot(Y), V.dot(N));
+
+        // Sample visible normal distribution
+        float_T phi = 2.0f * M_PI * u1;
+        float_T theta = std::atan(roughness * std::sqrt(u2 / (1.0f - u2)));
+
+        float_T cos_theta = std::cos(theta);
+        float_T sin_theta = std::sin(theta);
+        float_T cos_phi = std::cos(phi);
+        float_T sin_phi = std::sin(phi);
+
+        // Compute half vector in tangent space
+        Vec3 Hlocal = Vec3(
+            sin_theta * cos_phi,
+            sin_theta * sin_phi,
+            cos_theta
+        ).normalized();
+
+        // Unstretch
+        Hlocal = Vec3(Hlocal.x * ax, Hlocal.y * ay, Hlocal.z).normalized();
+
+        // Transform back to world space
+        return (X * Hlocal.x + Y * Hlocal.y + N * Hlocal.z).normalized();
     }
 
     // GGX (Trowbridge-Reitz) Distribution Function
-    static float_T D_GGX_aniso(const Vec3& H, const Vec3& N, 
+    static float_T D_GGX_aniso(const Vec3& H, const Vec3& N,
                               const Vec3& X, const Vec3& Y,
                               float_T ax, float_T ay) {
         float_T NdotH = std::max(epsilon, N.dot(H));
-        
+
         // Early exit if normal and half vector are perpendicular
         if (NdotH <= 0) return 0;
 
         // Project H onto the tangent plane
         float_T HdotX = H.dot(X);
         float_T HdotY = H.dot(Y);
-        
+
         // Calculate the squared slopes
         float_T ax2 = sqr(ax);
         float_T ay2 = sqr(ay);
-        
+
         // Calculate the normalization factor
         float_T denom = (sqr(HdotX) / ax2 + sqr(HdotY) / ay2 + sqr(NdotH));
-        
+
         return 1.0f / (M_PI * ax * ay * sqr(denom));
     }
 
@@ -678,33 +700,6 @@ private:
         float_T a = alphaG * alphaG;
         float_T b = NdotV * NdotV;
         return 1. / (NdotV + safe_sqrt(a + b - a * b));
-    }
-
-    Vec3 sampleGGXVNDF(const Vec3& V, float_T alpha, const Vec3& X, const Vec3& Y, const Vec3& N) const {
-        float_T u1 = randomFloat();
-        float_T u2 = randomFloat();
-
-        // Sample theta with GGX/Trowbridge-Reitz distribution
-        float_T phi = 2.0f * M_PI * u1;
-        float_T theta = std::atan(alpha * std::sqrt(u2 / (1.0f - u2)));
-
-        // Convert to cartesian coordinates
-        float_T cosTheta = std::cos(theta);
-        float_T sinTheta = std::sin(theta);
-        float_T cosPhi = std::cos(phi);
-        float_T sinPhi = std::sin(phi);
-
-        // Create half-vector in tangent space
-        Vec3 H = Vec3(
-                sinTheta * cosPhi,
-                sinTheta * sinPhi,
-                cosTheta
-                ).normalized();
-
-        // Transform to world space
-        Vec3 Hworld = (H.x * X + H.y * Y + H.z * N).normalized();
-
-        return Hworld;
     }
 
     // TODO probably make the eval and caculate pdf functions into lambdas
@@ -766,12 +761,29 @@ private:
         float_T NdotH = std::max(epsilon, N.dot(H));
         float_T LdotH = std::max(epsilon, L.dot(H));
         
-        float_T Dr = GTR1(NdotH, std::lerp(0.1f, 0.001f, clearcoatGloss));
-        float_T Fr = std::lerp(0.04f, 1.0f, std::pow(1.0f - LdotH, 5.0f));
-        float_T Gr = smithG(NdotL, 0.25f) * smithG(NdotV, 0.25f);
         
-        return Vec3(0.25f * clearcoat * Gr * Fr * Dr);
-    }
+    // Fixed IOR of 1.5 gives F0 of 0.04
+    const float_T F0 = 0.04f;
+    // Use the same Fresnel equation as specular but with fixed F0
+    float_T Fr = F0 + (1.0f - F0) * std::pow(1.0f - LdotH, 5.0f);
+    
+    // You can either keep GTR1 or switch to GGX for consistency
+    // Option 1: Keep GTR1 with better gloss mapping
+    float_T alpha = std::lerp(0.1f, 0.001f, clearcoatGloss);
+    float_T Dr = GTR1(NdotH, alpha);
+    
+    // Option 2: Use GGX (like specular) with fixed roughness
+    // float_T roughness = std::lerp(0.25f, 0.1f, clearcoatGloss);
+    // float_T Dr = D_GGX_aniso(H, N, X, Y, roughness, roughness);
+    
+    // Use the same geometry term as specular but with fixed roughness
+    const float_T fixed_roughness = 0.25f;
+    float_T Gr = smithG(NdotL, fixed_roughness) * smithG(NdotV, fixed_roughness);
+    
+    // No color tinting - clearcoat is always white
+    return Vec3(clearcoat * Gr * Fr * Dr);
+}
+
 
     // TODO probably calculate the weights during construction
 
@@ -1995,6 +2007,31 @@ struct Renderer{
         }
     }
 
+    // Helper function to create orthonormal basis
+    std::pair<Vec3, Vec3> createOrthonormalBasis(const Vec3& N) {
+        assert(N == N.normalized() && "N must be a normal vector");
+
+        // First, pick a helper vector that's not parallel to N
+        Vec3 helper = std::abs(N.z) < 0.999f ? Vec3(0, 0, 1) : Vec3(1, 0, 0);
+
+        // Construct X to be perpendicular to N using the helper
+        Vec3 X = N.cross(helper).normalized();
+
+        // Construct Y to be perpendicular to both N and X
+        Vec3 Y = N.cross(X);  // Note: no need to normalize since N and X are unit vectors
+                                     // and perpendicular to each other
+
+        assert(X == X.normalized() && "X must be normalized");
+        assert(Y == Y.normalized() && "Y must be normalized");
+
+        // For debugging, these assertions should now pass
+        assert(std::abs(X.dot(Y)) < epsilon && "X and Y must be orthogonal");
+        assert(std::abs(N.dot(Y)) < epsilon && "N and Y must be orthogonal");
+        assert(std::abs(N.dot(X)) < epsilon && "N and X must be orthogonal");
+
+        return {X, Y};
+    }
+
     template<ImportanceSamplingTechnique samplingTechnique = COSINE_WEIGHTED_HEMISPHERE>
     Vec3 shadePathtraced(const Intersection& intersection, uint32_t bounces = 1){
         if(bounces > scene.nBounces)
@@ -2011,19 +2048,9 @@ struct Renderer{
 
         // TODO make this into a helper method somewhere, this code is duplicated in so many places
         // Create tangent space basis vectors
-        Vec3 Y(0.);
-        if (std::abs(N.x) > std::abs(N.z)) {
-            float length = std::sqrt(N.x * N.x + N.y * N.y);
-            Y = length > epsilon ? 
-                Vec3(-N.y / length, N.x / length, 0.0f) : 
-                Vec3(1.0f, 0.0f, 0.0f);
-        } else {
-            float length = std::sqrt(N.y * N.y + N.z * N.z);
-            Y = length > epsilon ? 
-                Vec3(0.0f, -N.z / length, N.y / length) : 
-                Vec3(0.0f, 1.0f, 0.0f);
-        }
-        Vec3 X = Y.cross(N);
+        auto [X, Y] = createOrthonormalBasis(N);
+
+        
 
         // TODO reintroduce comments from previous version
 
