@@ -1,5 +1,5 @@
 {
-    "nbounces":6, 
+    "nbounces":3, 
     "rendermode":"pathtrace",
     "pathtracingOpts" : {
         "samplesPerPixel" : 4,
@@ -31,22 +31,18 @@
                     "radius":0.3, 
                     "material":
                         { 
-                            "ks":0.1, 
-                            "kd":0.9, 
+                            "ks":0.0, 
+                            "kd":1.0, 
                             "diffusecolor":[1,1,1],
                             "speculartint": 0.0,
-                            "subsurface": 0.0,
+                            "subsurface": 1.0,
                             "metallic": 0.0,
                             "roughness" : 1.0,
-                            "anisotropic": 0.5,
+                            "anisotropic": 0.0,
                             "sheen": 0.0,
                             "sheentint": 0.0,
                             "clearcoat": 0.0,
                             "clearcoatgloss": 0.0,
-                            "isreflective":true,
-                            "reflectivity":0.5,
-                            "isrefractive":false,
-                            "refractiveindex":1.0,
                             "texture":"textures/globe.ppm"
                         } 
                 },
@@ -106,13 +102,13 @@
                     "height": 0.5,
                     "material":
                         { 
-                            "ks":1.0, 
-                            "kd":0.9, 
+                            "ks":0.9, 
+                            "kd":0.1, 
                             "diffusecolor":[1, 1, 1],
                             "speculartint": 0.0,
                             "subsurface": 0.0,
                             "metallic": 0.5,
-                            "roughness" : 0.11,
+                            "roughness" : 0.05,
                             "anisotropic": 0.5,
                             "sheen": 0.0,
                             "sheentint": 0.0,
@@ -273,7 +269,7 @@
                             "reflectivity":0.25,
                             "isrefractive":false,
                             "refractiveindex":1.0,
-                            "emissive": 5.0
+                            "emissive": 45.0
                         } 
                 },
                 { 
@@ -301,7 +297,7 @@
                             "reflectivity":0.25,
                             "isrefractive":false,
                             "refractiveindex":1.0,
-                            "emissive": 5.0
+                            "emissive": 45.0
                         } 
                 },
                 { 

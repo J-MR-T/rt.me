@@ -87,6 +87,8 @@ struct Vec3{
 
     explicit Vec3(float_T uniform) : x(uniform), y(uniform), z(uniform){ }
 
+    Vec3() : Vec3(0.) {}
+
     Vec3 operator+(const Vec3& other) const{
         return Vec3(x+other.x, y+other.y, z+other.z);
     }
@@ -207,6 +209,11 @@ struct Vec3{
 
     float_T distance(const Vec3& other) const{
         return (*this - other).length();
+    }
+
+    Vec3 reflect(const Vec3& normal) const{
+        const Vec3 incomingDirection = *this;
+        return incomingDirection - normal * 2 * (incomingDirection.dot(normal));
     }
 };
 
@@ -584,160 +591,288 @@ struct PrincipledBRDFMaterial : MaterialBase{
         return emissiveness * diffuseColorAtTextureCoords(textureCoords);
     }
 
-    /// returns the reflected color at the given texture coordinates for the given incomnig/outgoing ray pair
-    /// the diffuse part of this does *not multiply* by PI for the lambertian BRDF, as this is accounted for by *not dividing* by PI in the pathtracing shading function
-    /// note that the ray direction of the incoming ray is actually away from the intersection point, and the outgoing ray is towards the intersection point, because
-    /// we're tracing from the camera!
-    Vec3 pathtracingBRDF(const Vec2& textureCoords, const Ray& incomingRay, const Ray& outgoingRay, const Vec3& surfaceNormal) const {
-
-        // TODO better way of chosing, probably just separate out into different structs
-        constexpr enum {
-            LAMBERTIAN,
-            DISNEY
-        } brdfType = DISNEY;
-
-        if constexpr(brdfType == LAMBERTIAN){
-            return diffuseColorAtTextureCoords(textureCoords) * baseColorIntensity;
-        }else if constexpr(brdfType == DISNEY){
-    // Get the base color from texture or constant
-    Vec3 diffuseBaseColor = diffuseColorAtTextureCoords(textureCoords);
-
-    // Calculate various directions
-    Vec3 N = surfaceNormal.normalized();
-    // Fixed direction calculations - outgoing ray direction should be negated
-    Vec3 V = (-outgoingRay.direction).normalized();  // View direction
-    Vec3 L = incomingRay.direction.normalized();     // Light direction (removed negation)
     
-    // Early exit if light is below surface
-    if (N.dot(L) <= 0.0f || N.dot(V) <= 0.0f) {
-        return Vec3(0.0f);
-    }
-    
-    Vec3 H = (L + V).normalized();                   // Half vector
+private:
+    static constexpr float_T epsilon = 1e-5f;
 
-    // Create tangent space basis vectors with epsilon checks
-    Vec3 Y(0.);
-    if (std::abs(N.x) > std::abs(N.z)) {
-        float length = std::sqrt(N.x * N.x + N.y * N.y);
-        if (length > epsilon) {
-            Y = Vec3(-N.y / length, N.x / length, 0.0f);
-        } else {
-            Y = Vec3(1.0f, 0.0f, 0.0f);
-        }
-    } else {
-        float length = std::sqrt(N.y * N.y + N.z * N.z);
-        if (length > epsilon) {
-            Y = Vec3(0.0f, -N.z / length, N.y / length);
-        } else {
-            Y = Vec3(0.0f, 1.0f, 0.0f);
-        }
-    }
-    Vec3 X = Y.cross(N);
-
-    // Useful dot products with clamping
-    float NdotL = std::clamp(N.dot(L), epsilon, 1.0f);
-    float NdotV = std::clamp(N.dot(V), epsilon, 1.0f);
-    float NdotH = std::clamp(N.dot(H), epsilon, 1.0f);
-    float LdotH = std::clamp(L.dot(H), epsilon, 1.0f);
-    float VdotH = std::clamp(V.dot(H), epsilon, 1.0f);
-
-    // Anisotropic calculations with clamping
-    float XdotH = std::clamp(X.dot(H), -1.0f + epsilon, 1.0f - epsilon);
-    float YdotH = std::clamp(Y.dot(H), -1.0f + epsilon, 1.0f - epsilon);
-    float XdotV = std::clamp(X.dot(V), -1.0f + epsilon, 1.0f - epsilon);
-    float YdotV = std::clamp(Y.dot(V), -1.0f + epsilon, 1.0f - epsilon);
-    float XdotL = std::clamp(X.dot(L), -1.0f + epsilon, 1.0f - epsilon);
-    float YdotL = std::clamp(Y.dot(L), -1.0f + epsilon, 1.0f - epsilon);
-
-    // Utility functions with additional safety
-    auto sqr = [](float x) { return x * x; };
-    auto safe_sqrt = [](float x) { return std::sqrt(std::max(epsilon, x)); };
-    auto lerp = [](const auto& x, const auto& y, float a) {
-        return x * (1.0f - a) + y * a;
-    };
-
-    // Luminance approximation with safety check
-    auto luminance = [](const Vec3& color) {
+    // Utility functions
+    static float_T sqr(float_T x) { return x * x; }
+    static float_T safe_sqrt(float_T x) { return std::sqrt(std::max(epsilon, x)); }
+    static float_T luminance(const Vec3& color) {
         return std::max(epsilon, color.dot(Vec3(0.3f, 0.6f, 0.1f)));
-    };
-
-    // Modified GTR1 Distribution (for clearcoat)
-    auto GTR1 = [](float NdotH, float a) {
-        if (a >= 1.0f) return (float_T) (1. / M_PI);
-        float_T a2 = std::max(epsilon, a * a);
-        float_T t = 1. + (a2 - 1.) * NdotH * NdotH;
-        return std::max(epsilon, (float_T) ((a2 - 1.0f) / (M_PI * std::max(epsilon, std::log(a2)) * std::max(epsilon, t))));
-    };
-
-    // Modified GTR2_aniso Distribution
-    auto GTR2_aniso = [&sqr](float NdotH, float HdotX, float HdotY, float ax, float ay) {
-        float denominator = sqr(HdotX/std::max(epsilon, ax)) + sqr(HdotY/std::max(epsilon, ay)) + sqr(NdotH);
-        return 1.0f / (M_PI * std::max(epsilon, ax * ay * sqr(denominator)));
-    };
-
-    // Modified Smith geometric shadowing
-    auto smithG_GGX_aniso = [&](float NdotV, float VdotX, float VdotY, float ax, float ay) {
-        float denominator = NdotV + safe_sqrt(sqr(VdotX*ax) + sqr(VdotY*ay) + sqr(NdotV));
-        return 1.0f / std::max(epsilon, denominator);
-    };
-
-    // Smith geometric shadowing lambda
-    auto smithG = [&safe_sqrt](float NdotV, float alphaG) {
-        float a = std::max(epsilon, alphaG * alphaG);
-        float b = std::max(epsilon, NdotV * NdotV);
-        return 1.0f / std::max(epsilon, NdotV + safe_sqrt(a + b - a * b));
-    };
-
-    // Calculate specular tint with safety
-    Vec3 tint = (luminance(diffuseBaseColor) > epsilon) ? 
-                diffuseBaseColor / luminance(diffuseBaseColor) : 
-                Vec3(1.0f);
-
-    // Rest of the calculations with additional safety checks
-    Vec3 specularColor = (Vec3(1.0f) * 0.08f * specular).lerp(tint, specularTint).lerp(diffuseBaseColor, metallic);
-    Vec3 F0 = specularColor;
-
-    // Diffuse Component
-    float FL = std::pow(std::max(epsilon, 1.0f - NdotL), 5.0f);
-    float FV = std::pow(std::max(epsilon, 1.0f - NdotV), 5.0f);
-    float Rr = 2.0f * roughness * sqr(LdotH);
-    float Fd90 = 0.5f + 2.0f * roughness * sqr(LdotH);
-    float Fd = lerp(1.0f, Fd90, FL) * lerp(1.0f, Fd90, FV);
-
-    float Fss90 = Rr;
-    float Fss = lerp(1.0f, Fss90, FL) * lerp(1.0f, Fss90, FV);
-    float ss = 1.25f * (Fss * (1.0f / std::max(epsilon, NdotL + NdotV) - 0.5f) + 0.5f);
-
-    Vec3 diffuse = (1.0f / M_PI) * lerp(Fd, ss, subsurface) * diffuseBaseColor * (1.0f - metallic);
-
-    // Specular Component
-    float aspect = safe_sqrt(1.0f - anisotropic * 0.9f);
-    float ax = std::max(0.001f, sqr(roughness) / std::max(epsilon, aspect));
-    float ay = std::max(0.001f, sqr(roughness) * aspect);
-
-    Vec3 F = F0 + (Vec3(1.0f) - F0) * std::pow(std::max(epsilon, 1.0f - LdotH), 5.0f);
-    float D = GTR2_aniso(NdotH, XdotH, YdotH, ax, ay);
-    float Gs = smithG_GGX_aniso(NdotL, XdotL, YdotL, ax, ay);
-    float Gv = smithG_GGX_aniso(NdotV, XdotV, YdotV, ax, ay);
-    Vec3 spec = Gs * Gv * F * D;
-
-    // Sheen Layer
-    Vec3 sheenColor = lerp(Vec3(1.0f), tint, sheenTint);
-    float FH = std::pow(std::max(epsilon, 1.0f - LdotH), 5.0f);
-    Vec3 Fsheen = FH * sheen * sheenColor;
-
-    // Clearcoat Layer
-    float Dr = GTR1(NdotH, lerp(0.1f, 0.001f, clearcoatGloss));
-    float Fr = lerp(0.04f, 1.0f, FH);
-    float Gr = smithG(NdotL, 0.25f) * smithG(NdotV, 0.25f);
-    Vec3 clearcoatLayer = Vec3(0.25f * clearcoat * Gr * Fr * Dr);
-
-    // Final combination with safety clamp
-    Vec3 result = diffuse + spec + Fsheen + clearcoatLayer;
-    return result;
-        }
     }
 
+    // Distribution functions
+    static float_T GTR1(float_T NdotH, float_T a) {
+        if (a >= 1.0f) return (float_T)(1.0 / M_PI);
+        float_T a2 = std::max(epsilon, a * a);
+        float_T t = 1.0 + (a2 - 1.0) * NdotH * NdotH;
+        return (a2 - 1.0f) / (M_PI * std::log(a2) * t);
+    }
+
+    static float_T GTR2_aniso(float_T NdotH, float_T HdotX, float_T HdotY, float_T ax, float_T ay) {
+        float_T denominator = sqr(HdotX/ax) + sqr(HdotY/ay) + sqr(NdotH);
+        return 1.0f / (M_PI * ax * ay * sqr(denominator));
+    }
+
+    // Geometric shadowing functions
+    static float_T smithG_GGX_aniso(float_T NdotV, float_T VdotX, float_T VdotY, float_T ax, float_T ay) {
+        return 1.0f / (NdotV + safe_sqrt(sqr(VdotX*ax) + sqr(VdotY*ay) + sqr(NdotV)));
+    }
+
+    static float_T smithG(float_T NdotV, float_T alphaG) {
+        float_T a = alphaG * alphaG;
+        float_T b = NdotV * NdotV;
+        return 1.0f / (NdotV + safe_sqrt(a + b - a * b));
+    }
+
+    Vec3 sampleGGXVNDF(const Vec3& V, float_T alpha, const Vec3& X, const Vec3& Y, const Vec3& N) const {
+        float_T u1 = randomFloat();
+        float_T u2 = randomFloat();
+
+        // Sample theta with GGX/Trowbridge-Reitz distribution
+        float_T phi = 2.0f * M_PI * u1;
+        float_T theta = std::atan(alpha * std::sqrt(u2 / (1.0f - u2)));
+
+        // Convert to cartesian coordinates
+        float_T cosTheta = std::cos(theta);
+        float_T sinTheta = std::sin(theta);
+        float_T cosPhi = std::cos(phi);
+        float_T sinPhi = std::sin(phi);
+
+        // Create half-vector in tangent space
+        Vec3 H = Vec3(
+                sinTheta * cosPhi,
+                sinTheta * sinPhi,
+                cosTheta
+                ).normalized();
+
+        // Transform to world space
+        Vec3 Hworld = (H.x * X + H.y * Y + H.z * N).normalized();
+
+        // Simple adjustment for visibility (bias towards view direction)
+        Vec3 Vn = V.normalized();
+        float_T VdotH = std::max(epsilon, Vn.dot(Hworld));
+
+        // Blend between pure GGX sample and reflection direction based on roughness
+        Vec3 R = (-Vn).reflect(N);
+        Hworld = (Hworld * VdotH + R * alpha).normalized();
+
+        return Hworld;
+    }
+
+    // TODO probably make the eval and caculate pdf functions into lambdas
+    // TODO clean up all of the clamps and epsilons
+
+    // BRDF component evaluation functions
+    Vec3 evaluateDiffuseBRDF(const Vec3& baseColor, float_T NdotL, float_T NdotV, float_T LdotH) const {
+        float_T FL = std::pow(1.0f - NdotL, 5.0f);
+        float_T FV = std::pow(1.0f - NdotV, 5.0f);
+        float_T Rr = 2.0f * roughness * sqr(LdotH);
+        
+        float_T Fd90 = 0.5f + 2.0f * roughness * sqr(LdotH);
+        float_T Fd = std::lerp(1.0f, Fd90, FL) * std::lerp(1.0f, Fd90, FV);
+        
+        float_T Fss90 = Rr;
+        float_T Fss = std::lerp(1.0f, Fss90, FL) * std::lerp(1.0f, Fss90, FV);
+        float_T ss = 1.25f * (Fss * (1.0f / (NdotL + NdotV) - 0.5f) + 0.5f);
+        
+        return (1.0f / M_PI) * std::lerp(Fd, ss, subsurface) * baseColor * (1.0f - metallic);
+    }
+
+    Vec3 evaluateSpecularBRDF(const Vec3& baseColor, const Vec3& V, const Vec3& L, const Vec3& H,
+            const Vec3& X, const Vec3& Y, const Vec3& N) const {
+        float_T NdotL = std::max(epsilon, N.dot(L));
+        float_T NdotV = std::max(epsilon, N.dot(V));
+        float_T NdotH = std::max(epsilon, N.dot(H));
+        float_T LdotH = std::max(epsilon, L.dot(H));
+
+        float_T aspect = safe_sqrt(1.0f - anisotropic * 0.9f);
+        float_T ax = std::max(0.001f, sqr(roughness) / aspect);
+        float_T ay = std::max(0.001f, sqr(roughness) * aspect);
+
+        // Calculate specular tint
+        Vec3 tint = (luminance(baseColor) > epsilon) ? 
+            baseColor / luminance(baseColor) : Vec3(1.0f);
+
+        // Fixed: Properly initialize specular color from Vec3(1.0f)
+        Vec3 specularColor = (Vec3(1.0f) * 0.08f * specular).lerp(tint, specularTint).lerp(baseColor, metallic);
+
+        Vec3 F = specularColor + (Vec3(1.0f) - specularColor) * std::pow(1.0f - LdotH, 5.0f);
+        float_T D = GTR2_aniso(NdotH, H.dot(X), H.dot(Y), ax, ay);
+        float_T Gs = smithG_GGX_aniso(NdotL, L.dot(X), L.dot(Y), ax, ay);
+        float_T Gv = smithG_GGX_aniso(NdotV, V.dot(X), V.dot(Y), ax, ay);
+
+        return F * D * Gs * Gv;
+    }
+
+    Vec3 evaluateClearcoatBRDF(const Vec3& V, const Vec3& L, const Vec3& H, const Vec3& N) const {
+        float_T NdotL = std::max(epsilon, N.dot(L));
+        float_T NdotV = std::max(epsilon, N.dot(V));
+        float_T NdotH = std::max(epsilon, N.dot(H));
+        float_T LdotH = std::max(epsilon, L.dot(H));
+        
+        float_T Dr = GTR1(NdotH, std::lerp(0.1f, 0.001f, clearcoatGloss));
+        float_T Fr = std::lerp(0.04f, 1.0f, std::pow(1.0f - LdotH, 5.0f));
+        float_T Gr = smithG(NdotL, 0.25f) * smithG(NdotV, 0.25f);
+        
+        return Vec3(0.25f * clearcoat * Gr * Fr * Dr);
+    }
+
+    // Sampling strategy weights
+    float_T calculateDiffuseWeight() const {
+        // Diffuse weight only depends on:
+        // - metallic (metals don't have diffuse)
+        // - clearcoat (reduces underlying diffuse)
+        // - and the diffuse intensity itself
+        return (1.0f - metallic) * baseColorIntensity * (1.0f - 0.5f * clearcoat * clearcoatGloss);
+    }
+
+    float_T calculateSpecularWeight() const {
+        // Specular weight depends on:
+        // - metallic (increases specular)
+        // - roughness (decreases specular more aggressively)
+        // - specular parameter
+        return (1.0f + metallic) * specular * (1.0f - roughness * roughness);
+    }
+
+    float_T calculateClearcoatWeight() const {
+        return clearcoat * clearcoatGloss;
+    }
+
+    float_T calculateDiffusePDF(const Vec3& L, const Vec3& N) const {
+        // For cosine-weighted hemisphere sampling, the PDF is cos(theta)/pi
+        // where theta is the angle between the normal and sampled direction
+        float_T cosTheta = std::max(epsilon, N.dot(L));
+        return cosTheta / M_PI;
+    }
+
+    float_T calculateSpecularPDF(const Vec3& V, const Vec3& L, const Vec3& H,
+            const Vec3& N, const Vec3& X, const Vec3& Y,
+            float_T roughness) const {
+        float_T NdotH = std::max(epsilon, N.dot(H));
+        float_T VdotH = std::max(epsilon, V.dot(H));
+
+        // Use squared roughness for alpha
+        float_T alpha = roughness * roughness;
+
+        // D_GGX term
+        float_T D = GTR2_aniso(NdotH, H.dot(X), H.dot(Y), alpha, alpha);
+
+        // Jacobian of the half-vector to light-vector transformation
+        float_T jacobian = 1.0f / (4.0f * VdotH);
+
+        if (VdotH < epsilon || NdotH < epsilon) {
+            return 0.0f;
+        }
+
+        float_T pdf = D * NdotH * jacobian;
+        return std::clamp(pdf, epsilon, 1e3f);
+    }
+
+    float_T calculateClearcoatPDF(const Vec3& V, const Vec3& L, const Vec3& H,
+            const Vec3& N) const {
+        float_T NdotH = std::max(epsilon, N.dot(H));
+        float_T VdotH = std::max(epsilon, V.dot(H));
+
+        // Clearcoat uses GTR1 distribution with fixed roughness
+        // interpolated based on clearcoatGloss
+        float_T alpha = std::lerp(0.1f, 0.001f, clearcoatGloss);
+
+        // D_GTR1 term
+        float_T D = GTR1(NdotH, alpha);
+
+        // Same Jacobian as specular
+        float_T jacobian = 1.0f / (4.0f * VdotH);
+
+        if (VdotH < epsilon || NdotH < epsilon) {
+            return 0.0f;
+        }
+
+        float_T pdf = D * NdotH * jacobian;
+        return std::clamp(pdf, epsilon, 1e3f);
+    }
+
+public:
+    struct BRDFSample {
+        Vec3 direction;  // Sampled direction in world space
+        float_T pdf;    // Probability density of the sample
+    };
+
+    // Main sampling function
+    BRDFSample sampleBRDF(const Vec3& V, 
+                         const Vec3& N, const Vec3& X, const Vec3& Y) const {
+         // Calculate weights
+        float_T diffuseWeight = calculateDiffuseWeight();
+        float_T specularWeight = calculateSpecularWeight();
+        float_T clearcoatWeight = calculateClearcoatWeight();
+        
+        // Normalize weights
+        float_T totalWeight = diffuseWeight + specularWeight + clearcoatWeight;
+        diffuseWeight /= totalWeight;
+        specularWeight /= totalWeight;
+        clearcoatWeight /= totalWeight;
+
+        BRDFSample sample;
+        float_T rand = randomFloat();
+        
+        // Sample direction based on weights
+        if (rand < diffuseWeight) {
+            // Cosine-weighted hemisphere sampling
+            float_T r1 = randomFloat();
+            float_T r2 = randomFloat();
+            float_T phi = 2.0f * M_PI * r1;
+            float_T cosTheta = std::sqrt(r2);
+            float_T sinTheta = std::sqrt(1.0f - r2);
+            
+            sample.direction = (
+                X * (std::cos(phi) * sinTheta) +
+                Y * (std::sin(phi) * sinTheta) +
+                N * cosTheta
+            ).normalized();
+        }
+        else if (rand < diffuseWeight + specularWeight) {
+            Vec3 H = sampleGGXVNDF(V, roughness * roughness, X, Y, N);
+            sample.direction = (-V).reflect(H);
+        }
+        else {
+            Vec3 H = sampleGGXVNDF(V, 0.25f, X, Y, N);
+            sample.direction = (-V).reflect(H);
+        }
+
+        // Calculate PDF for each strategy
+        float_T diffusePdf = calculateDiffusePDF(sample.direction, N);
+        float_T specularPdf = calculateSpecularPDF(V, sample.direction, (V + sample.direction).normalized(), N, X, Y, roughness);
+        float_T clearcoatPdf = calculateClearcoatPDF(V, sample.direction, (V + sample.direction).normalized(), N);
+
+        // Combine PDFs using balance heuristic
+        sample.pdf = diffuseWeight * diffusePdf + 
+                    specularWeight * specularPdf + 
+                    clearcoatWeight * clearcoatPdf;
+
+        return sample;
+    }
+
+    // Combined BRDF evaluation
+    Vec3 evaluateBRDF(const Vec2& textureCoords, const Vec3& V, const Vec3& L,
+                      const Vec3& X, const Vec3& Y, const Vec3& N) const {
+        if (N.dot(L) <= 0.0f || N.dot(V) <= 0.0f) {
+            return Vec3(0.0f);
+        }
+        
+        Vec3 H = (L + V).normalized();
+        Vec3 baseColor = diffuseColorAtTextureCoords(textureCoords);
+        
+        float_T NdotL = std::max(epsilon, N.dot(L));
+        float_T NdotV = std::max(epsilon, N.dot(V));
+        float_T LdotH = std::max(epsilon, L.dot(H));
+        
+        return baseColorIntensity * (
+            evaluateDiffuseBRDF(baseColor, NdotL, NdotV, LdotH) +
+            evaluateSpecularBRDF(baseColor, V, L, H, X, Y, N) +
+            evaluateClearcoatBRDF(V, L, H, N)
+        );
+    }
 };
 
 struct Material {
@@ -1583,9 +1718,7 @@ struct Renderer{
         // TODO could do fresnel here and for refractivity
         if(material.reflectivity.has_value()) {
             Vec3 reflectedColor = scene.backgroundColor;
-            Vec3 reflectionDir = intersectionToShade.incomingRay->direction - 
-                intersectionToShade.surfaceNormal * 2 * 
-                (intersectionToShade.incomingRay->direction.dot(intersectionToShade.surfaceNormal));
+            Vec3 reflectionDir = intersectionToShade.incomingRay->direction.reflect(intersectionToShade.surfaceNormal);
             Ray reflectionRay(intersectionToShade.point + reflectionDir * (10 * epsilon), reflectionDir);
 
             if (auto reflectionIntersection = traceRayToClosestSceneIntersection(reflectionRay)) {
@@ -1815,63 +1948,81 @@ struct Renderer{
 
         const PrincipledBRDFMaterial& material = intersection.material->assumePrincipledBRDFMaterial();
 
-        // start with emission
+        // Start with emission
         Vec3 overallColor = material.emissionColor(intersection.textureCoords);
 
-        // TODO weight specular vs non-specular bounce via probability
+        // Create orthonormal basis for BRDF sampling
+        Vec3 N = intersection.surfaceNormal.normalized();
+        Vec3 V = (-intersection.incomingRay->direction).normalized();
 
-        auto contributionFromHemisphereAroundDirection = [this, &intersection, &material, bounces] [[nodiscard]] (const Vec3& direction, bool doSample){
-            // optionally sample multiple times
-            // not necessary because of monte carlo - we're sampling each pixel multiple times anyway
-            // but this gives greater control: you're free to introduce exponential time complexity if you like :)
-            Vec3 accumulatedContributions(0.);
-            for(unsigned hemisphereSampleNum = 0; hemisphereSampleNum < scene.pathtracingSamples.hemisphereSamplesPerBounce; hemisphereSampleNum++){
-
-                Vec3 hemisphereSample(0.);
-                if(doSample)
-                    hemisphereSample = sampleHemisphere<samplingTechnique>(direction);
-                else
-                    hemisphereSample = direction;
-
-                Ray incomingRay(intersection.point + hemisphereSample * (10 * epsilon), hemisphereSample);
-
-                Vec3 incomingColor = scene.backgroundColor;
-                if(auto incomingIntersection = traceRayToClosestSceneIntersection(incomingRay)){
-                    incomingColor = shadePathtraced<samplingTechnique>(*incomingIntersection, bounces + 1);
-                }
-
-                const auto mainBounceBRDF = material.pathtracingBRDF(intersection.textureCoords, incomingRay, *intersection.incomingRay, intersection.surfaceNormal);
-
-                if(doSample){
-                    if constexpr(samplingTechnique == COSINE_WEIGHTED_HEMISPHERE){
-                        accumulatedContributions += incomingColor * mainBounceBRDF;
-                    }else if(samplingTechnique == UNIFORM){
-                        // weight by the cosine of the angle between the normal and the incoming ray, this weighting is already present in the cosine weighted hemisphere sampling
-                        // the 2. factor comes from dividing by the PDF, which is 1/2pi for uniform sampling.
-                        // TODO pi in the diffuse brdf cancelling out sometimes, but not every time - regard this?
-                        accumulatedContributions += 2. * incomingColor * mainBounceBRDF * intersection.surfaceNormal.dot(hemisphereSample);
-                    }
-                }else{
-                    accumulatedContributions += incomingColor * mainBounceBRDF * intersection.surfaceNormal.dot(hemisphereSample);
-                }
-            }
-            return accumulatedContributions / scene.pathtracingSamples.hemisphereSamplesPerBounce;
-        };
-
-        // now sample the brdf
-        // to choose whether to sample in a diffuse way (around the normal) or in a specular way (around the reflection direction), use material roughness
-        auto diffuseProbability = std::max((float_T)0.001, material.roughness);
-        if(randomFloat() < diffuseProbability){
-            // diffuse lighting
-            auto contribution = contributionFromHemisphereAroundDirection(intersection.surfaceNormal, true);
-            overallColor += contribution/diffuseProbability;
-        }else{
-            Vec3 reflectedDir = intersection.incomingRay->direction - 
-                intersection.surfaceNormal * 2 * 
-                (intersection.incomingRay->direction.dot(intersection.surfaceNormal));
-            auto contribution = contributionFromHemisphereAroundDirection(reflectedDir, false);
-            overallColor += contribution/(1-diffuseProbability);
+        // TODO make this into a helper method somewhere, this code is duplicated in so many places
+        // Create tangent space basis vectors
+        Vec3 Y(0.);
+        if (std::abs(N.x) > std::abs(N.z)) {
+            float length = std::sqrt(N.x * N.x + N.y * N.y);
+            Y = length > epsilon ? 
+                Vec3(-N.y / length, N.x / length, 0.0f) : 
+                Vec3(1.0f, 0.0f, 0.0f);
+        } else {
+            float length = std::sqrt(N.y * N.y + N.z * N.z);
+            Y = length > epsilon ? 
+                Vec3(0.0f, -N.z / length, N.y / length) : 
+                Vec3(0.0f, 1.0f, 0.0f);
         }
+        Vec3 X = Y.cross(N);
+
+        // TODO reintroduce comments from previous version
+
+        unsigned actualSamplesTaken = 0;
+
+        // Sample contribution for each hemisphere sample
+        Vec3 accumulatedContributions(0.);
+        for(unsigned hemisphereSampleNum = 0; 
+                hemisphereSampleNum < scene.pathtracingSamples.hemisphereSamplesPerBounce; 
+                hemisphereSampleNum++) {
+
+            // Get sample from BRDF
+            auto sample = material.sampleBRDF(V, N, X, Y);
+
+            // TODO not sure this is right
+            // Skip invalid samples
+            if (sample.pdf <= epsilon) {
+                continue;
+            }
+
+            // in this case, we're going to actually use the sample
+            actualSamplesTaken++;
+
+            // Create and trace ray in sampled direction
+            Ray incomingRay(
+                    intersection.point + sample.direction * (10 * epsilon), 
+                    sample.direction
+                    );
+
+            Vec3 incomingColor = scene.backgroundColor;
+            if(auto incomingIntersection = traceRayToClosestSceneIntersection(incomingRay)) {
+                incomingColor = shadePathtraced(*incomingIntersection, bounces + 1);
+            }
+
+            // Evaluate BRDF for this direction
+            Vec3 brdfValue = material.evaluateBRDF(
+                    intersection.textureCoords,
+                    V,
+                    sample.direction,
+                    X, Y, N
+                    );
+
+            float_T cosTheta = std::max(0.0f, N.dot(sample.direction));
+
+
+            // Accumulate contribution
+            // Note: cosine term is included in BRDF evaluation
+            accumulatedContributions += incomingColor * brdfValue * cosTheta/sample.pdf;
+        }
+
+        if(actualSamplesTaken > 0)
+            // Average the samples
+            overallColor += accumulatedContributions / actualSamplesTaken;
 
         if(!scene.pointLights.empty()){
             // sample point lights explicitly, because they are infinitessimally small, they can never be hit by a random ray
@@ -1891,33 +2042,33 @@ struct Renderer{
 
                 // TODO hmm, this would be the more accurate version, because we dont want to just sample in an even sphere around the intersection point, just on the surface
                 // this does reduce noise, but it introduces strange artifacts for triangle meshes
-//                    Vec3 tangent(0.), bitangent(0.);
-//if (std::abs(intersection.surfaceNormal.x) < std::abs(intersection.surfaceNormal.y)) {
-//    tangent = Vec3(0, intersection.surfaceNormal.z, -intersection.surfaceNormal.y).normalized();
-//} else {
-//    tangent = Vec3(intersection.surfaceNormal.z, 0, -intersection.surfaceNormal.x).normalized();
-//}
-//bitangent = intersection.surfaceNormal.cross(tangent);
-//
-//// Generate random offset in tangent space
-//float r = sqrt(randomFloat()) * light.shadowSoftness; // sqrt for uniform disk sampling
-//float theta = randomFloat() * 2 * M_PI;
-//float x = r * cos(theta);
-//float y = r * sin(theta);
-//
-//// Apply offset in tangent space
-//Vec3 intersectionOriginPlusJitter = intersection.point +
-//(tangent * x + bitangent * y);
+                //                    Vec3 tangent(0.), bitangent(0.);
+                //if (std::abs(intersection.surfaceNormal.x) < std::abs(intersection.surfaceNormal.y)) {
+                //    tangent = Vec3(0, intersection.surfaceNormal.z, -intersection.surfaceNormal.y).normalized();
+                //} else {
+                //    tangent = Vec3(intersection.surfaceNormal.z, 0, -intersection.surfaceNormal.x).normalized();
+                //}
+                //bitangent = intersection.surfaceNormal.cross(tangent);
+                //
+                //// Generate random offset in tangent space
+                //float r = sqrt(randomFloat()) * light.shadowSoftness; // sqrt for uniform disk sampling
+                //float theta = randomFloat() * 2 * M_PI;
+                //float x = r * cos(theta);
+                //float y = r * sin(theta);
+                //
+                //// Apply offset in tangent space
+                //Vec3 intersectionOriginPlusJitter = intersection.point +
+                //(tangent * x + bitangent * y);
 
                 Vec3 L = (light.position - intersectionOriginPlusJitter).normalized();
                 Vec3 shadowRayOrigin = intersectionOriginPlusJitter + L * (100 * epsilon);
-                
+
                 Ray shadowRay(shadowRayOrigin, L);
 
                 if(isInShadow(intersection, light, shadowRay))
                     continue;
 
-                Vec3 brdf = material.pathtracingBRDF(intersection.textureCoords, shadowRay, *intersection.incomingRay, intersection.surfaceNormal);
+                Vec3 brdf = material.evaluateBRDF(intersection.textureCoords, V, L, X, Y, N);
                 // weight the contribution by the angle between the normal and the light ray
                 float_T weight = std::max(intersection.surfaceNormal.dot(L), (float_T) 0.);
                 accumulatedContributions += brdf * weight * light.intensityPerColor;
