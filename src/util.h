@@ -215,6 +215,33 @@ struct Vec3{
         const Vec3 incomingDirection = *this;
         return incomingDirection - normal * 2 * (incomingDirection.dot(normal));
     }
+
+    // === static helpers ===
+
+    static std::pair</* tangent */ Vec3, /* bitangent */ Vec3> createOrthonormalBasis(const Vec3& N) {
+        assert(N == N.normalized() && "N must be a normal vector");
+
+        // First, pick a helper vector that's not parallel to N
+        Vec3 helper = std::abs(N.z) < 0.999f ? Vec3(0, 0, 1) : Vec3(1, 0, 0);
+
+        // Construct X (tangent/T) to be perpendicular to N using the helper
+        Vec3 X = N.cross(helper).normalized();
+
+        // Construct Y (bitangent/B) to be perpendicular to both N and X
+        Vec3 Y = N.cross(X);  // Note: no need to normalize since N and X are unit vectors
+                                     // and perpendicular to each other
+
+        assert(X == X.normalized() && "X must be normalized");
+        assert(Y == Y.normalized() && "Y must be normalized");
+
+        // For debugging, these assertions should now pass
+        assert(std::abs(X.dot(Y)) < epsilon && "X and Y must be orthogonal");
+        assert(std::abs(N.dot(Y)) < epsilon && "N and Y must be orthogonal");
+        assert(std::abs(N.dot(X)) < epsilon && "N and X must be orthogonal");
+
+        return {X, Y};
+    }
+
 };
 
 // overload std::format/std::println for Vec3
@@ -275,8 +302,11 @@ public:
     }
 
     void rewind(){
-        file.flush();
         file.seekp(pixelDataStart);
+    }
+
+    void flush(){
+        file.flush();
     }
 };
 
@@ -301,11 +331,11 @@ private:
 public:
 
     /// assumes that the direction is normalized!
+    /// creates a ray exactly as specified
     static Ray createExact(Vec3 origin, Vec3 direction){
         return Ray(origin, direction);
     }
 
-    ///  TODO doc
     /// Slightly offsets the ray from its origin in the direction to avoid self intersections
     /// with the object it might have originated from
     /// assumes that the direction is normalized!
@@ -369,11 +399,11 @@ protected:
         return pixelOrigin;
     }
 
-    // TODO something about this is off I think, the image seems a little bit stretched
-    // TODO I think part of it is the assumed 1 unit distance to the image plane
     void setImagePlaneDimensionsFromFOV(float_T fovDegrees){
-        const float_T verticalFOVRad = fovDegrees * (M_PI / 180.0); // Convert FOV to radians
+        // Convert FOV to radians
+        const float_T verticalFOVRad = fovDegrees * (M_PI / 180.0);
         imagePlaneHeight = 2. * tan(verticalFOVRad / 2.); // Distance to image plane is 1 unit
+        // calculate image plane width from pixel screen aspect ratio
         const float_T aspectRatio = width / height;
         imagePlaneDimensions = Vec2(imagePlaneHeight * aspectRatio, imagePlaneHeight);
     }
@@ -489,23 +519,14 @@ struct Color8Bit{
 };
 
 struct Texture{
+private:
     uint32_t width, height;
-    // dont use vectors, would waste memory
-    // TODO check vs performance benefit of not having to convert to Vec3 at runtime
     std::vector<Color8Bit> pixels;
 
+public:
     Texture(uint32_t width, uint32_t height, std::vector<Color8Bit> pixels)
         : width(width), height(height), pixels(pixels){
         assert(width * height == pixels.size() && "Texture dimensions don't match pixel count");
-    }
-
-    /// initialize an empty texture to be filled later
-    Texture(uint32_t width, uint32_t height)
-        : width(width), height(height), pixels(width*height){ }
-
-    void fillUninitialized(std::vector<Color8Bit>&& pixels){
-        assert(width * height == pixels.size() && "Texture dimensions don't match pixel count");
-        this->pixels = std::move(pixels);
     }
 
     Vec3 colorAt(const Vec2& textureCoords) const{
@@ -600,14 +621,42 @@ struct PrincipledBRDFMaterial : MaterialBase{
             float_T sheenTint,
             float_T clearcoat,
             float_T clearcoatGloss)
-        : MaterialBase(diffuseColor, texture), emissiveness(emissiveness), baseColorDiffuseIntensity(baseColorIntensity), metallic(metallic), subsurface(subsurface), specular(specular), roughness(roughness), specularTint(specularTint), anisotropic(anisotropic), sheen(sheen), sheenTint(sheenTint), clearcoat(clearcoat), clearcoatGloss(clearcoatGloss) { }
+        : MaterialBase(diffuseColor, texture), emissiveness(emissiveness), baseColorDiffuseIntensity(baseColorIntensity), metallic(metallic), subsurface(subsurface), specular(specular), roughness(roughness), specularTint(specularTint), anisotropic(anisotropic), sheen(sheen), sheenTint(sheenTint), clearcoat(clearcoat), clearcoatGloss(clearcoatGloss) {
+
+            // Diffuse weight only depends on:
+            // - metallic (metals don't have diffuse)
+            // - clearcoat (reduces underlying diffuse)
+            // - and the diffuse intensity itself
+            diffuseWeight = (1.0f - metallic) * baseColorDiffuseIntensity * (1.0f - 0.5f * clearcoat * clearcoatGloss);
+
+            // Specular weight depends on:
+            // - metallic (increases specular)
+            // - roughness (decreases specular more aggressively)
+            // - specular parameter
+            specularWeight = (1.0f + metallic) * specular * (1.0f - roughness * roughness);
+
+            clearcoatWeight = clearcoat * clearcoatGloss;
+
+            // normalize them
+            float_T totalWeight = diffuseWeight + specularWeight + clearcoatWeight;
+            diffuseWeight /= totalWeight;
+            specularWeight /= totalWeight;
+            clearcoatWeight /= totalWeight;
+        }
 
     Vec3 emissionColor(const Vec2& textureCoords) const {
         return emissiveness * diffuseColorAtTextureCoords(textureCoords);
     }
 
-    
 private:
+    // sampling weights for BRDF sampling components
+    // these weights always add up to 1
+
+    float_T diffuseWeight;
+    float_T specularWeight;
+    float_T clearcoatWeight;
+
+
     // Utility functions
     static float_T sqr(float_T x) { return x * x; }
     static float_T safe_sqrt(float_T x) { return std::sqrt(std::max(epsilon, x)); }
@@ -773,53 +822,30 @@ private:
         float_T NdotV = std::max(epsilon, N.dot(V));
         float_T NdotH = std::max(epsilon, N.dot(H));
         float_T LdotH = std::max(epsilon, L.dot(H));
-        
-        
-    // Fixed IOR of 1.5 gives F0 of 0.04
-    const float_T F0 = 0.04f;
-    // Use the same Fresnel equation as specular but with fixed F0
-    float_T Fr = F0 + (1.0f - F0) * std::pow(1.0f - LdotH, 5.0f);
-    
-    // You can either keep GTR1 or switch to GGX for consistency
-    // Option 1: Keep GTR1 with better gloss mapping
-    float_T alpha = std::lerp(0.1f, 0.001f, clearcoatGloss);
-    float_T Dr = GTR1(NdotH, alpha);
-    
-    // Option 2: Use GGX (like specular) with fixed roughness
-    // float_T roughness = std::lerp(0.25f, 0.1f, clearcoatGloss);
-    // float_T Dr = D_GGX_aniso(H, N, X, Y, roughness, roughness);
-    
-    // Use the same geometry term as specular but with fixed roughness
-    const float_T fixed_roughness = 0.25f;
-    float_T Gr = smithG(NdotL, fixed_roughness) * smithG(NdotV, fixed_roughness);
-    
-    // No color tinting - clearcoat is always white
-    return Vec3(clearcoat * Gr * Fr * Dr);
-}
 
 
-    // TODO probably calculate the weights during construction
+        // Fixed IOR of 1.5 gives F0 of 0.04
+        const float_T F0 = 0.04f;
+        // Use the same Fresnel equation as specular but with fixed F0
+        float_T Fr = F0 + (1.0f - F0) * std::pow(1.0f - LdotH, 5.0f);
 
-    // Sampling strategy weights
-    float_T calculateDiffuseWeight() const {
-        // Diffuse weight only depends on:
-        // - metallic (metals don't have diffuse)
-        // - clearcoat (reduces underlying diffuse)
-        // - and the diffuse intensity itself
-        return (1.0f - metallic) * baseColorDiffuseIntensity * (1.0f - 0.5f * clearcoat * clearcoatGloss);
+        // You can either keep GTR1 or switch to GGX for consistency
+        // Option 1: Keep GTR1 with better gloss mapping
+        float_T alpha = std::lerp(0.1f, 0.001f, clearcoatGloss);
+        float_T Dr = GTR1(NdotH, alpha);
+
+        // Option 2: Use GGX (like specular) with fixed roughness
+        // float_T roughness = std::lerp(0.25f, 0.1f, clearcoatGloss);
+        // float_T Dr = D_GGX_aniso(H, N, X, Y, roughness, roughness);
+
+        // Use the same geometry term as specular but with fixed roughness
+        const float_T fixed_roughness = 0.25f;
+        float_T Gr = smithG(NdotL, fixed_roughness) * smithG(NdotV, fixed_roughness);
+
+        // No color tinting - clearcoat is always white
+        return Vec3(clearcoat * Gr * Fr * Dr);
     }
 
-    float_T calculateSpecularWeight() const {
-        // Specular weight depends on:
-        // - metallic (increases specular)
-        // - roughness (decreases specular more aggressively)
-        // - specular parameter
-        return (1.0f + metallic) * specular * (1.0f - roughness * roughness);
-    }
-
-    float_T calculateClearcoatWeight() const {
-        return clearcoat * clearcoatGloss;
-    }
 
     float_T calculateDiffusePDF(const Vec3& L, const Vec3& N) const {
         // For cosine-weighted hemisphere sampling, the PDF is cos(theta)/pi
@@ -888,17 +914,6 @@ public:
     // Main sampling function
     BRDFSample sampleBRDF(const Vec3& V, 
                          const Vec3& N, const Vec3& X, const Vec3& Y) const {
-         // Calculate weights
-        float_T diffuseWeight = calculateDiffuseWeight();
-        float_T specularWeight = calculateSpecularWeight();
-        float_T clearcoatWeight = calculateClearcoatWeight();
-        
-        // Normalize weights
-        float_T totalWeight = diffuseWeight + specularWeight + clearcoatWeight;
-        diffuseWeight /= totalWeight;
-        specularWeight /= totalWeight;
-        clearcoatWeight /= totalWeight;
-
         BRDFSample sample;
         float_T rand = randomFloat();
         
@@ -1435,7 +1450,6 @@ struct BVHNode{
     std::unique_ptr<BVHNode> left, right;
     /// range of objects in the scene object list that this node represents
     ObjectRange objectRange;
-    // -> from this, it is clear that objects can only overlap "linearly", i.e. only if they are adjacent in the list
 
     static constexpr size_t MAX_DEPTH = 16;
     // TODO maybe remove in future, or make an option; not in use currently, because even though it reduces memory usage, it doesn't improve performance
@@ -1674,13 +1688,16 @@ struct Renderer{
     }
 
     void writeBufferToFile(){
+        // start where the pixel data starts
         writer.rewind();
-        // write buffer to file
+
         assert(hdrPixelBuffer.size() == scene.camera->widthPixels * scene.camera->heightPixels && "Pixel buffer size mismatch");
         for(auto& hdrPixel: hdrPixelBuffer){
+            // second part of tone-mapping
             auto ldrPixel = hdrPixel.clamp(0., 1.);
             writer.writePixel(ldrPixel);
         }
+        writer.flush();
     }
 
 
@@ -1808,8 +1825,11 @@ struct Renderer{
         return color;
     }
 
-    /// does *not* clamp the color, this is done in writing the pixel to the buffer
+    /// does *not* clamp the color yet, this is done in writing the buffer to the file
     Vec3 linearToneMapping(Vec3 color){
+        // we cannot clamp the color here, because for incremental renders, we need the buffer to be in high-dynamic range,
+        // i.e. if we clamped here, and then averaged with later samples, the image wouldn't be brightened up
+        // (see PBR 3rd edition Figure 14.7 for more)
         return color*scene.camera->exposure * 15.;
     }
 
@@ -1890,9 +1910,6 @@ struct Renderer{
 
             std::println(stderr, "Rendering stopped: Final image has {} samples per pixel", samplesPerPixelSoFar);
         }else{
-            // cant try gpu openacc because nvcc doesnt support c++23 :(
-            // openacc might not work at all with gcc here, is basically the same time as serial
-            //#pragma acc parallel loop
 #pragma omp parallel for
             for(uint32_t y = 0; y < scene.camera->heightPixels; y++){
                 for(uint32_t x = 0; x < scene.camera->widthPixels; x++){
@@ -1940,7 +1957,7 @@ struct Renderer{
         for(auto& pixel: hdrPixelBuffer){
             float_T intensity = pixel.x;
             if(intensity > redThreshhold * maxIntensity)
-                pixel = Vec3(1.0, 0.0, 0.0);
+                pixel = Vec3(intensity, 0.0, 0.0);
             else
                 pixel = pixel / maxIntensity;
         }
@@ -1952,13 +1969,15 @@ struct Renderer{
                 Ray cameraRay = scene.camera->generateRay(Vec2(x, y));
 
                 if(auto closestIntersection = traceRayToClosestSceneIntersection(cameraRay)){
-                    auto normalZeroOne = closestIntersection->surfaceNormal * 0.5 + Vec3(0.5);
-                    bufferSpecificPixel(Vec2(x, y), normalZeroOne);
+                    auto normalBetweenZeroOne = closestIntersection->surfaceNormal * 0.5 + Vec3(0.5);
+                    bufferSpecificPixel(Vec2(x, y), normalBetweenZeroOne);
                 }
             }
         }
     }
 
+    /*
+     TODO not used right now - either throw away, or put into separate lambertian material
     enum ImportanceSamplingTechnique{
         UNIFORM,
         COSINE_WEIGHTED_HEMISPHERE,
@@ -2017,33 +2036,8 @@ struct Renderer{
             static_assert(false, "Invalid importance sampling technique");
         }
     }
+    */
 
-    // Helper function to create orthonormal basis
-    std::pair<Vec3, Vec3> createOrthonormalBasis(const Vec3& N) {
-        assert(N == N.normalized() && "N must be a normal vector");
-
-        // First, pick a helper vector that's not parallel to N
-        Vec3 helper = std::abs(N.z) < 0.999f ? Vec3(0, 0, 1) : Vec3(1, 0, 0);
-
-        // Construct X to be perpendicular to N using the helper
-        Vec3 X = N.cross(helper).normalized();
-
-        // Construct Y to be perpendicular to both N and X
-        Vec3 Y = N.cross(X);  // Note: no need to normalize since N and X are unit vectors
-                                     // and perpendicular to each other
-
-        assert(X == X.normalized() && "X must be normalized");
-        assert(Y == Y.normalized() && "Y must be normalized");
-
-        // For debugging, these assertions should now pass
-        assert(std::abs(X.dot(Y)) < epsilon && "X and Y must be orthogonal");
-        assert(std::abs(N.dot(Y)) < epsilon && "N and Y must be orthogonal");
-        assert(std::abs(N.dot(X)) < epsilon && "N and X must be orthogonal");
-
-        return {X, Y};
-    }
-
-    template<ImportanceSamplingTechnique samplingTechnique = COSINE_WEIGHTED_HEMISPHERE>
     Vec3 shadePathtraced(const Intersection& intersection, uint32_t bounces = 1){
         if(bounces > scene.nBounces)
             return Vec3(scene.backgroundColor);
@@ -2059,8 +2053,7 @@ struct Renderer{
 
         // TODO make this into a helper method somewhere, this code is duplicated in so many places
         // Create tangent space basis vectors
-        auto [X, Y] = createOrthonormalBasis(N);
-
+        auto [X, Y] = Vec3::createOrthonormalBasis(N);
         
 
         // TODO reintroduce comments from previous version
