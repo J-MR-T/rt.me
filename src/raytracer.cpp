@@ -14,9 +14,10 @@ void printHelpExit(char* argv0, int status){
 }
 
 Texture readPPMTexture(std::string_view path){
-    std::ifstream textureIfstream((std::string(path)));
+    std::string pathStr(path);
+    std::ifstream textureIfstream(pathStr);
     if(textureIfstream.fail()){
-        std::perror("Couldn't read from texture file");
+        std::perror(("Couldn't read from texture file \"" + pathStr + "\"").c_str());
         std::exit(EXIT_FAILURE);
     }
 

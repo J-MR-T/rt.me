@@ -72,6 +72,48 @@
                 },
                 { 
                     "type":"sphere", 
+                    "center": [-0.15, 0.4, 1.25],
+                    "radius":0.15, 
+                    "material":
+                        { 
+                            "ks":0.5, 
+                            "kd":0.5, 
+                            "diffusecolor":[1,1,1],
+                            "speculartint": 0.0,
+                            "subsurface": 0.0,
+                            "metallic": 0.0,
+                            "roughness" : 0.001,
+                            "anisotropic": 0.0,
+                            "sheen": 0.0,
+                            "sheentint": 0.0,
+                            "clearcoat": 0.0,
+                            "clearcoatgloss": 0.0,
+                            "emissive": 0.0
+                        } 
+                },
+                { 
+                    "type":"sphere", 
+                    "center": [0.15, 0.4, 1.25],
+                    "radius":0.15, 
+                    "material":
+                        { 
+                            "ks":0.0, 
+                            "kd":1.0, 
+                            "diffusecolor":[1,1,1],
+                            "speculartint": 0.0,
+                            "subsurface": 0.0,
+                            "metallic": 0.0,
+                            "roughness" : 1.0,
+                            "anisotropic": 0.0,
+                            "sheen": 0.0,
+                            "sheentint": 0.0,
+                            "clearcoat": 1.0,
+                            "clearcoatgloss": 1.0,
+                            "emissive": 0.0
+                        } 
+                },
+                { 
+                    "type":"sphere", 
                     "center": [1, 1, 2],
                     "radius":0.1, 
                     "material":
@@ -109,7 +151,7 @@
                             "subsurface": 0.0,
                             "metallic": 0.5,
                             "roughness" : 0.05,
-                            "anisotropic": 0.5,
+                            "anisotropic": 0.0,
                             "sheen": 0.0,
                             "sheentint": 0.0,
                             "clearcoat": 0.0,

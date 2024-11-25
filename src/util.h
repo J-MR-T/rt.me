@@ -558,7 +558,7 @@ struct PhongMaterial : MaterialBase {
 struct PrincipledBRDFMaterial : MaterialBase{
     float_T emissiveness;
 
-    float_T baseColorIntensity;
+    float_T baseColorDiffuseIntensity;
     float_T metallic;
     float_T subsurface;
     float_T specular;
@@ -569,6 +569,8 @@ struct PrincipledBRDFMaterial : MaterialBase{
     float_T sheenTint;
     float_T clearcoat;
     float_T clearcoatGloss;
+
+    // TODO sheen went missing along the way
 
     PrincipledBRDFMaterial(
             Vec3 diffuseColor,
@@ -585,7 +587,7 @@ struct PrincipledBRDFMaterial : MaterialBase{
             float_T sheenTint,
             float_T clearcoat,
             float_T clearcoatGloss)
-        : MaterialBase(diffuseColor, texture), emissiveness(emissiveness), baseColorIntensity(baseColorIntensity), metallic(metallic), subsurface(subsurface), specular(specular), roughness(roughness), specularTint(specularTint), anisotropic(anisotropic), sheen(sheen), sheenTint(sheenTint), clearcoat(clearcoat), clearcoatGloss(clearcoatGloss) { }
+        : MaterialBase(diffuseColor, texture), emissiveness(emissiveness), baseColorDiffuseIntensity(baseColorIntensity), metallic(metallic), subsurface(subsurface), specular(specular), roughness(roughness), specularTint(specularTint), anisotropic(anisotropic), sheen(sheen), sheenTint(sheenTint), clearcoat(clearcoat), clearcoatGloss(clearcoatGloss) { }
 
     Vec3 emissionColor(const Vec2& textureCoords) const {
         return emissiveness * diffuseColorAtTextureCoords(textureCoords);
@@ -593,8 +595,6 @@ struct PrincipledBRDFMaterial : MaterialBase{
 
     
 private:
-    static constexpr float_T epsilon = 1e-5f;
-
     // Utility functions
     static float_T sqr(float_T x) { return x * x; }
     static float_T safe_sqrt(float_T x) { return std::sqrt(std::max(epsilon, x)); }
@@ -610,20 +610,74 @@ private:
         return (a2 - 1.0f) / (M_PI * std::log(a2) * t);
     }
 
-    static float_T GTR2_aniso(float_T NdotH, float_T HdotX, float_T HdotY, float_T ax, float_T ay) {
-        float_T denominator = sqr(HdotX/ax) + sqr(HdotY/ay) + sqr(NdotH);
-        return 1.0f / (M_PI * ax * ay * sqr(denominator));
+    //static float_T GTR2_aniso(float_T NdotH, float_T HdotX, float_T HdotY, float_T ax, float_T ay) {
+    //    float_T denominator = sqr(HdotX/ax) + sqr(HdotY/ay) + sqr(NdotH);
+    //    return 1.0f / (M_PI * ax * ay * sqr(denominator));
+    //}
+
+    //static float_T GTR2_aniso(float_T NdotH, float_T HdotX, float_T HdotY, float_T ax, float_T ay) {
+    //    float_T ax2 = ax * ax;
+    //    float_T ay2 = ay * ay;
+    //    float_T invDenom = HdotX * HdotX / ax2 + HdotY * HdotY / ay2 + NdotH * NdotH;
+    //    return 1.0f / (M_PI * ax * ay * invDenom * invDenom);
+    //}
+
+     // Helper for anisotropic calculations
+    static void calculateAnisotropicParams(float_T roughness, float_T anisotropic,
+                                         float_T& ax, float_T& ay) {
+        // Ensure roughness is non-zero
+        roughness = std::max(0.001f, roughness);
+        
+        // Calculate anisotropic roughness values
+        float_T aspect = std::sqrt(1.0f - 0.9f * anisotropic);
+        ax = roughness / aspect;
+        ay = roughness * aspect;
     }
 
+    // GGX (Trowbridge-Reitz) Distribution Function
+    static float_T D_GGX_aniso(const Vec3& H, const Vec3& N, 
+                              const Vec3& X, const Vec3& Y,
+                              float_T ax, float_T ay) {
+        float_T NdotH = std::max(epsilon, N.dot(H));
+        
+        // Early exit if normal and half vector are perpendicular
+        if (NdotH <= 0) return 0;
+
+        // Project H onto the tangent plane
+        float_T HdotX = H.dot(X);
+        float_T HdotY = H.dot(Y);
+        
+        // Calculate the squared slopes
+        float_T ax2 = sqr(ax);
+        float_T ay2 = sqr(ay);
+        
+        // Calculate the normalization factor
+        float_T denom = (sqr(HdotX) / ax2 + sqr(HdotY) / ay2 + sqr(NdotH));
+        
+        return 1.0f / (M_PI * ax * ay * sqr(denom));
+    }
+
+
+    // TODO aniso does not really work yet
+
     // Geometric shadowing functions
-    static float_T smithG_GGX_aniso(float_T NdotV, float_T VdotX, float_T VdotY, float_T ax, float_T ay) {
-        return 1.0f / (NdotV + safe_sqrt(sqr(VdotX*ax) + sqr(VdotY*ay) + sqr(NdotV)));
+    //static float_T smithG_GGX_aniso(float_T NdotV, float_T VdotX, float_T VdotY, float_T ax, float_T ay) {
+    //    return 1.0f / (NdotV + safe_sqrt(sqr(VdotX*ax) + sqr(VdotY*ay) + sqr(NdotV)));
+    //}
+
+    static float_T smithG_GGX_aniso(float_T NdotV, float_T VdotX, float_T VdotY, 
+            float_T NdotL, float_T LdotX, float_T LdotY,
+            float_T ax, float_T ay) {
+        float_T lambda_V = NdotV + safe_sqrt(sqr(VdotX*ax) + sqr(VdotY*ay) + sqr(NdotV));
+        float_T lambda_L = NdotL + safe_sqrt(sqr(LdotX*ax) + sqr(LdotY*ay) + sqr(NdotL));
+
+        return 2. / (lambda_V * lambda_L);
     }
 
     static float_T smithG(float_T NdotV, float_T alphaG) {
         float_T a = alphaG * alphaG;
         float_T b = NdotV * NdotV;
-        return 1.0f / (NdotV + safe_sqrt(a + b - a * b));
+        return 1. / (NdotV + safe_sqrt(a + b - a * b));
     }
 
     Vec3 sampleGGXVNDF(const Vec3& V, float_T alpha, const Vec3& X, const Vec3& Y, const Vec3& N) const {
@@ -650,14 +704,6 @@ private:
         // Transform to world space
         Vec3 Hworld = (H.x * X + H.y * Y + H.z * N).normalized();
 
-        // Simple adjustment for visibility (bias towards view direction)
-        Vec3 Vn = V.normalized();
-        float_T VdotH = std::max(epsilon, Vn.dot(Hworld));
-
-        // Blend between pure GGX sample and reflection direction based on roughness
-        Vec3 R = (-Vn).reflect(N);
-        Hworld = (Hworld * VdotH + R * alpha).normalized();
-
         return Hworld;
     }
 
@@ -677,7 +723,7 @@ private:
         float_T Fss = std::lerp(1.0f, Fss90, FL) * std::lerp(1.0f, Fss90, FV);
         float_T ss = 1.25f * (Fss * (1.0f / (NdotL + NdotV) - 0.5f) + 0.5f);
         
-        return (1.0f / M_PI) * std::lerp(Fd, ss, subsurface) * baseColor * (1.0f - metallic);
+        return (1.0f / M_PI) * std::lerp(Fd, ss, subsurface) * baseColor * baseColorDiffuseIntensity * (1.0f - metallic);
     }
 
     Vec3 evaluateSpecularBRDF(const Vec3& baseColor, const Vec3& V, const Vec3& L, const Vec3& H,
@@ -686,24 +732,32 @@ private:
         float_T NdotV = std::max(epsilon, N.dot(V));
         float_T NdotH = std::max(epsilon, N.dot(H));
         float_T LdotH = std::max(epsilon, L.dot(H));
-
-        float_T aspect = safe_sqrt(1.0f - anisotropic * 0.9f);
-        float_T ax = std::max(0.001f, sqr(roughness) / aspect);
-        float_T ay = std::max(0.001f, sqr(roughness) * aspect);
-
-        // Calculate specular tint
+        
+        // Calculate anisotropic roughness parameters
+        float_T ax, ay;
+        calculateAnisotropicParams(roughness, anisotropic, ax, ay);
+        
+        // Calculate tint color
         Vec3 tint = (luminance(baseColor) > epsilon) ? 
             baseColor / luminance(baseColor) : Vec3(1.0f);
-
-        // Fixed: Properly initialize specular color from Vec3(1.0f)
-        Vec3 specularColor = (Vec3(1.0f) * 0.08f * specular).lerp(tint, specularTint).lerp(baseColor, metallic);
-
+        
+        // Calculate specular color with proper metallic workflow
+        Vec3 specularColor = (Vec3(1.0f) * 0.08f * specular)
+                                .lerp(tint, specularTint)
+                                .lerp(baseColor, metallic);
+        
+        // Fresnel term (Schlick's approximation)
         Vec3 F = specularColor + (Vec3(1.0f) - specularColor) * std::pow(1.0f - LdotH, 5.0f);
-        float_T D = GTR2_aniso(NdotH, H.dot(X), H.dot(Y), ax, ay);
-        float_T Gs = smithG_GGX_aniso(NdotL, L.dot(X), L.dot(Y), ax, ay);
-        float_T Gv = smithG_GGX_aniso(NdotV, V.dot(X), V.dot(Y), ax, ay);
-
-        return F * D * Gs * Gv;
+        
+        // Distribution term (GGX/Trowbridge-Reitz)
+        float_T D = D_GGX_aniso(H, N, X, Y, ax, ay);
+        
+        // Geometric term
+        float_T G = smithG_GGX_aniso(NdotV, V.dot(X), V.dot(Y),
+                                    NdotL, L.dot(X), L.dot(Y),
+                                    ax, ay);
+        
+        return F * D * G;
     }
 
     Vec3 evaluateClearcoatBRDF(const Vec3& V, const Vec3& L, const Vec3& H, const Vec3& N) const {
@@ -719,13 +773,15 @@ private:
         return Vec3(0.25f * clearcoat * Gr * Fr * Dr);
     }
 
+    // TODO probably calculate the weights during construction
+
     // Sampling strategy weights
     float_T calculateDiffuseWeight() const {
         // Diffuse weight only depends on:
         // - metallic (metals don't have diffuse)
         // - clearcoat (reduces underlying diffuse)
         // - and the diffuse intensity itself
-        return (1.0f - metallic) * baseColorIntensity * (1.0f - 0.5f * clearcoat * clearcoatGloss);
+        return (1.0f - metallic) * baseColorDiffuseIntensity * (1.0f - 0.5f * clearcoat * clearcoatGloss);
     }
 
     float_T calculateSpecularWeight() const {
@@ -753,21 +809,26 @@ private:
         float_T NdotH = std::max(epsilon, N.dot(H));
         float_T VdotH = std::max(epsilon, V.dot(H));
 
-        // Use squared roughness for alpha
-        float_T alpha = roughness * roughness;
+        // Calculate anisotropic roughness parameters
+        float_T ax, ay;
+        calculateAnisotropicParams(roughness, anisotropic, ax, ay);
 
-        // D_GGX term
-        float_T D = GTR2_aniso(NdotH, H.dot(X), H.dot(Y), alpha, alpha);
+        // Calculate the GGX distribution term
+        float_T D = D_GGX_aniso(H, N, X, Y, ax, ay);
 
-        // Jacobian of the half-vector to light-vector transformation
-        float_T jacobian = 1.0f / (4.0f * VdotH);
+        // The PDF for GGX importance sampling is:
+        // pdf = D * NdotH / (4 * VdotH)
+        // This comes from the Jacobian of the half-vector transformation
 
+        // Handle numerical stability for grazing angles
         if (VdotH < epsilon || NdotH < epsilon) {
             return 0.0f;
         }
 
-        float_T pdf = D * NdotH * jacobian;
-        return std::clamp(pdf, epsilon, 1e3f);
+        float_T pdf = (D * NdotH) / (4.0f * VdotH);
+
+        // Use less aggressive clamping - allow for higher values at sharp specular peaks
+        return std::clamp(pdf, epsilon, 1e8f);
     }
 
     float_T calculateClearcoatPDF(const Vec3& V, const Vec3& L, const Vec3& H,
@@ -853,6 +914,8 @@ public:
         return sample;
     }
 
+    // TODO rename params (also for sample)
+
     // Combined BRDF evaluation
     Vec3 evaluateBRDF(const Vec2& textureCoords, const Vec3& V, const Vec3& L,
                       const Vec3& X, const Vec3& Y, const Vec3& N) const {
@@ -867,13 +930,16 @@ public:
         float_T NdotV = std::max(epsilon, N.dot(V));
         float_T LdotH = std::max(epsilon, L.dot(H));
         
-        return baseColorIntensity * (
+        return (
             evaluateDiffuseBRDF(baseColor, NdotL, NdotV, LdotH) +
             evaluateSpecularBRDF(baseColor, V, L, H, X, Y, N) +
             evaluateClearcoatBRDF(V, L, H, N)
         );
     }
 };
+
+const PhongMaterial defaultPhongMaterial = PhongMaterial(Vec3(1,1,1), Vec3(1,1,1), 0.5, 0.5, 32, 0.0, 0.0, std::nullopt);
+const PrincipledBRDFMaterial defaultPrincipledBRDFMaterial = PrincipledBRDFMaterial(Vec3(1.), std::nullopt, 0., 1., 0., 0., 0.5, 1., 0., 1., 0., 0., 0., 0.);
 
 struct Material {
     std::variant<PhongMaterial, PrincipledBRDFMaterial> variant;
@@ -915,19 +981,7 @@ struct Intersection{
         return (point - incomingRay->origin).length();
     }
 
-
 };
-
-const PhongMaterial defaultPhongMaterial = PhongMaterial(Vec3(1,1,1), Vec3(1,1,1), 0.5, 0.5, 32, 0.0, 0.0, std::nullopt);
-const PrincipledBRDFMaterial defaultPrincipledBRDFMaterial = PrincipledBRDFMaterial(Vec3(1.), std::nullopt, 0., 1., 0., 0., 0.5, 1., 0., 1., 0., 0., 0., 0.);
-
-//inline Material givenMaterialOrDefault(std::optional<Material> material){
-//    if(material.has_value())
-//        return std::move(material.value());
-//    else
-//        // default material, because the json format allows for no material to be specified
-//        return
-//}
 
 struct Sphere {
     Vec3 center;
@@ -1984,7 +2038,6 @@ struct Renderer{
             // Get sample from BRDF
             auto sample = material.sampleBRDF(V, N, X, Y);
 
-            // TODO not sure this is right
             // Skip invalid samples
             if (sample.pdf <= epsilon) {
                 continue;
@@ -2067,6 +2120,8 @@ struct Renderer{
 
                 if(isInShadow(intersection, light, shadowRay))
                     continue;
+
+                // TODO I think this is the wrong way around for point lights
 
                 Vec3 brdf = material.evaluateBRDF(intersection.textureCoords, V, L, X, Y, N);
                 // weight the contribution by the angle between the normal and the light ray
