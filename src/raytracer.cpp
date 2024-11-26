@@ -32,11 +32,10 @@ Texture readPPMTexture(std::string_view path){
         if(c == '#'){
             // skip comments
             while((c = textureIfstream.get()) != '\n' && c != EOF);
-
-            return;
         }
     };
 
+    /// ensures that there is exactly one whitespace, preceded or followed by comments
     auto checkAndSkipWhitespaceComments = [&textureIfstream, &fail, &maybeSkipComments](std::string_view message = "Invalid spacing/whitespace in header"){
         maybeSkipComments();
 
@@ -71,6 +70,9 @@ Texture readPPMTexture(std::string_view path){
     uint32_t height;
     if(!(textureIfstream >> height))
         fail("Invalid height");
+
+    if(width != height)
+        std::println(stderr, "Warning: non-square textures are not supported - use at your own risk");
 
     checkAndSkipWhitespaceComments();
 
@@ -396,7 +398,7 @@ Renderer jsonFileToRenderer(std::string_view path){
         }();
 
         if(type == "triangle"){
-            // spheres and cylinders have textures mapped automatically, triangles need to be mapped manually
+            // triangles have fully customizable texture mapping
             Vec2 texCoordv0;
             Vec2 texCoordv1;
             Vec2 texCoordv2;
@@ -406,7 +408,10 @@ Renderer jsonFileToRenderer(std::string_view path){
                 texCoordv0 = jsonToVec2(getOrFail(materialJ, "txv0"));
                 texCoordv1 = jsonToVec2(getOrFail(materialJ, "txv1"));
                 texCoordv2 = jsonToVec2(getOrFail(materialJ, "txv2"));
+            }else if(sceneObjectJ.contains("txv0") || sceneObjectJ.contains("txv1") || sceneObjectJ.contains("txv2")){
+                std::println(stderr, "Warning: texture coordinates specified, but no texture present - will be ignored");
             }
+
 
             // determine whether the triangle has vertex normals, choose appropriate triangle type
             bool shouldHaveVertexNormals = sceneObjectJ.contains("v0Normal");
@@ -437,18 +442,22 @@ Renderer jsonFileToRenderer(std::string_view path){
                 ));
             }
         }else if(type == "sphere"){
+            // spheres are texture-mapped automatically
             sceneObjects.emplace_back(Sphere(
                 jsonToVec3(getOrFail(sceneObjectJ, "center")),
                 (float_T) getOrFail(sceneObjectJ, "radius"),
                 std::move(material)
             ));
         }else if(type == "cylinder"){
+            // cylinders are mostly mapped automatically, but have some additional parameters
             sceneObjects.emplace_back(Cylinder(
                 jsonToVec3(getOrFail(sceneObjectJ, "center")),
                 (float_T) getOrFail(sceneObjectJ, "radius"),
                 (float_T) getOrFail(sceneObjectJ, "height"),
                 jsonToVec3(getOrFail(sceneObjectJ, "axis")),
-                std::move(material)
+                std::move(material),
+                getOrElse(sceneObjectJ, "textureSideStretchFactor", 1.),
+                getOrElse(sceneObjectJ, "textureCapScale", 1.)
             ));
         }else{
             fail("Invalid shape");
