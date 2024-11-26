@@ -1,0 +1,299 @@
+{
+    "nbounces":6, 
+    "rendermode":"pathtrace",
+    "pathtracingOpts" : {
+        "samplesPerPixel" : 4,
+        "apertureSamplesPerPixelSample" : 1,
+        "pointLightSamplesPerBounce" : 1,
+        "hemisphereSamplesPerBounce" : 1,
+        "incremental": true
+    },
+    "camera":
+        { 
+            "type":"pinhole", 
+            "width":1200, 
+            "height":800,
+            "position":[0, 0.0, -7.5],
+            "lookAt":[0, 0, 0],
+            "upVector":[0.0, 1.0, 0.0],
+            "fov":45.0,
+            "exposure":0.15
+        },
+    "scene":
+        { 
+            "backgroundcolor": [0,0,0],
+            "lightsources":[
+                { 
+                    "type":"pointlight", 
+                    "position":[10, 10.0, 55.0], 
+                    "intensity":[200.5, 200.5, 200.5],
+                    "shadowSoftness": 0.05
+                }
+            ], 
+            "shapes":[
+                {
+                    "type":"sphere", 
+                    "center": [0, 0, 0], 
+                    "radius":25.0, 
+                    "material":
+                        { 
+                            "ks":0.0, 
+                            "kd":1.0, 
+                            "diffusecolor":[1, 1, 1],
+                            "speculartint": 0.0,
+                            "subsurface": 0.0,
+                            "metallic": 0.0,
+                            "roughness" : 1.0,
+                            "anisotropic": 0.0,
+                            "sheen": 0.0,
+                            "sheentint": 0.0,
+                            "clearcoat": 0.0,
+                            "clearcoatgloss": 0.0,
+                            "texture": "textures/seaSkybox.ppm",
+                            "emissive": 0.11
+                        } 
+                },
+                {
+                    "type":"sphere", 
+                    "center": [-3.0, 2, 0], 
+                    "radius":0.9, 
+                    "material":
+                        { 
+                            "ks":0.0, 
+                            "kd":1.0, 
+                            "diffusecolor":[1,0,0],
+                            "subsurface": 0.0,
+                            "metallic": 0.0,
+                            "roughness" : 1.0,
+                            "speculartint": 0.0,
+                            "anisotropic": 0.0,
+                            "sheen": 0.0,
+                            "sheentint": 0.0,
+                            "clearcoat": 0.0,
+                            "clearcoatgloss": 0.0
+                        } 
+                },
+                {
+                    "type":"sphere", 
+                    "center": [-1.0, 2, 0], 
+                    "radius":0.9, 
+                    "material":
+                        { 
+                            "ks":0.0, 
+                            "kd":1.0, 
+                            "diffusecolor":[1,0,0],
+                            "subsurface": 2.0,
+                            "metallic": 0.0,
+                            "roughness" : 1.0,
+                            "speculartint": 0.0,
+                            "anisotropic": 0.0,
+                            "sheen": 0.0,
+                            "sheentint": 0.0,
+                            "clearcoat": 0.0,
+                            "clearcoatgloss": 0.0
+                        } 
+                },
+                {
+                    "type":"sphere", 
+                    "center": [1.0, 2, 0], 
+                    "radius":0.9, 
+                    "material":
+                        { 
+                            "ks":0.0, 
+                            "kd":1.0, 
+                            "diffusecolor":[1,0,0],
+                            "subsurface": 0.0,
+                            "metallic": 0.0,
+                            "roughness" : 1.0,
+                            "speculartint": 0.0,
+                            "anisotropic": 0.0,
+                            "sheen": 1.0,
+                            "sheentint": 0.0,
+                            "clearcoat": 0.0,
+                            "clearcoatgloss": 0.0
+                        } 
+                },
+                {
+                    "type":"sphere", 
+                    "center": [3.0, 2, 0], 
+                    "radius":0.9, 
+                    "material":
+                        { 
+                            "ks":0.0, 
+                            "kd":1.0, 
+                            "diffusecolor":[1,0,0],
+                            "subsurface": 0.0,
+                            "metallic": 0.0,
+                            "roughness" : 1.0,
+                            "speculartint": 0.0,
+                            "anisotropic": 0.0,
+                            "sheen": 1.0,
+                            "sheentint": 1.0,
+                            "clearcoat": 0.0,
+                            "clearcoatgloss": 0.0
+                        } 
+                },
+                {
+                    "type":"sphere", 
+                    "center": [-3.0, 0, 0], 
+                    "radius":0.9, 
+                    "material":
+                        { 
+                            "ks":1.0, 
+                            "kd":0.5, 
+                            "diffusecolor":[1,0,0],
+                            "subsurface": 0.0,
+                            "metallic": 0.0,
+                            "roughness" : 0.05,
+                            "speculartint": 0.0,
+                            "anisotropic": 0.0,
+                            "sheen": 0.0,
+                            "sheentint": 0.0,
+                            "clearcoat": 0.0,
+                            "clearcoatgloss": 0.0
+                        } 
+                },
+                {
+                    "type":"sphere", 
+                    "center": [-1.0, 0, 0], 
+                    "radius":0.9, 
+                    "material":
+                        { 
+                            "ks":1.0, 
+                            "kd":0.5, 
+                            "diffusecolor":[1,0,0],
+                            "subsurface": 0.0,
+                            "metallic": 0.0,
+                            "roughness" : 0.05,
+                            "speculartint": 0.5,
+                            "anisotropic": 0.0,
+                            "sheen": 0.0,
+                            "sheentint": 0.0,
+                            "clearcoat": 0.0,
+                            "clearcoatgloss": 0.0
+                        } 
+                },
+                {
+                    "type":"sphere", 
+                    "center": [1.0, 0, 0], 
+                    "radius":0.9, 
+                    "material":
+                        { 
+                            "ks":1.0, 
+                            "kd":0.5, 
+                            "diffusecolor":[1,0,0],
+                            "subsurface": 0.0,
+                            "metallic": 1.0,
+                            "roughness" : 0.05,
+                            "speculartint": 0.0,
+                            "anisotropic": 0.0,
+                            "sheen": 0.0,
+                            "sheentint": 0.0,
+                            "clearcoat": 0.0,
+                            "clearcoatgloss": 0.0
+                        } 
+                },
+                {
+                    "type":"sphere", 
+                    "center": [3.0, 0, 0], 
+                    "radius":0.9, 
+                    "material":
+                        { 
+                            "ks":1.0, 
+                            "kd":0.0, 
+                            "diffusecolor":[1,0,0],
+                            "subsurface": 0.0,
+                            "metallic": 1.0,
+                            "roughness" : 0.70,
+                            "speculartint": 0.2,
+                            "anisotropic": 0.0,
+                            "sheen": 0.0,
+                            "sheentint": 0.0,
+                            "clearcoat": 0.0,
+                            "clearcoatgloss": 0.0
+                        } 
+                },
+                {
+                    "type":"sphere", 
+                    "center": [-3.0, -2, 0], 
+                    "radius":0.9, 
+                    "material":
+                        { 
+                            "ks":1.0, 
+                            "kd":0.0, 
+                            "diffusecolor":[1,0,0],
+                            "subsurface": 0.0,
+                            "metallic": 1.0,
+                            "roughness" : 0.65,
+                            "speculartint": 0.2,
+                            "anisotropic": 0.0,
+                            "sheen": 0.0,
+                            "sheentint": 0.0,
+                            "clearcoat": 1.0,
+                            "clearcoatgloss": 1.0
+                        } 
+                },
+                {
+                    "type":"sphere", 
+                    "center": [-1.0, -2, 0], 
+                    "radius":0.9, 
+                    "material":
+                        { 
+                            "ks":1.0, 
+                            "kd":0.0, 
+                            "diffusecolor":[1,0,0],
+                            "subsurface": 0.0,
+                            "metallic": 0.5,
+                            "roughness" : 0.05,
+                            "speculartint": 0.0,
+                            "anisotropic": 0.0,
+                            "sheen": 0.0,
+                            "sheentint": 0.0,
+                            "clearcoat": 0.0,
+                            "clearcoatgloss": 0.0
+                        } 
+                },
+                {
+                    "type":"sphere", 
+                    "center": [1.0, -2, 0], 
+                    "radius":0.9, 
+                    "material":
+                        { 
+                            "ks":1.0, 
+                            "kd":0.0, 
+                            "diffusecolor":[1,0,0],
+                            "subsurface": 0.0,
+                            "metallic": 1.0,
+                            "roughness" : 0.65,
+                            "speculartint": 0.2,
+                            "anisotropic": 0.9,
+                            "sheen": 0.0,
+                            "sheentint": 0.0,
+                            "clearcoat": 0.0,
+                            "clearcoatgloss": 0.0
+                        } 
+                },
+                {
+                    "type":"sphere", 
+                    "center": [3.0, -2, 0], 
+                    "radius":0.9, 
+                    "material":
+                        { 
+                            "ks":1.0, 
+                            "kd":0.0, 
+                            "diffusecolor":[1,0,0],
+                            "subsurface": 0.0,
+                            "metallic": 1.0,
+                            "roughness" : 0.65,
+                            "speculartint": 0.2,
+                            "anisotropic": 0.0,
+                            "sheen": 0.0,
+                            "sheentint": 0.0,
+                            "clearcoat": 1.0,
+                            "clearcoatgloss": 1.0
+                        } 
+                }
+            ]
+        }
+
+}
