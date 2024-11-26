@@ -122,7 +122,7 @@ Texture readPPMTexture(std::string_view path){
     return Texture(width, height, pixels);
 }
 
-Scene jsonFileToScene(std::string_view path){
+Renderer jsonFileToRenderer(std::string_view path){
     std::ifstream jsonIfstream((std::string(path)));
 
     if(jsonIfstream.fail()){
@@ -179,6 +179,10 @@ Scene jsonFileToScene(std::string_view path){
 
     if(!root.is_object())
         fail("not an object");
+
+    // === start actually parsing ===
+
+    std::string outputPathS = getOrElse(root, "outfile", std::string("out.ppm"));
 
     json cameraJ            = getOrFail(root, "camera");
     uint32_t nBounces       = getOrElse(root, "nbounces", 1);
@@ -403,15 +407,35 @@ Scene jsonFileToScene(std::string_view path){
                 texCoordv1 = jsonToVec2(getOrFail(materialJ, "txv1"));
                 texCoordv2 = jsonToVec2(getOrFail(materialJ, "txv2"));
             }
-            sceneObjects.emplace_back(Triangle(
-                jsonToVec3(getOrFail(sceneObjectJ, "v0")),
-                jsonToVec3(getOrFail(sceneObjectJ, "v1")),
-                jsonToVec3(getOrFail(sceneObjectJ, "v2")),
-                std::move(material),
-                texCoordv0,
-                texCoordv1,
-                texCoordv2
-            ));
+
+            // determine whether the triangle has vertex normals, choose appropriate triangle type
+            bool shouldHaveVertexNormals = sceneObjectJ.contains("v0Normal");
+            if(shouldHaveVertexNormals) {
+                Vec3 v0Normal = jsonToVec3(getOrFail(sceneObjectJ, "v0Normal"));
+                Vec3 v1Normal = jsonToVec3(getOrFail(sceneObjectJ, "v1Normal"));
+                Vec3 v2Normal = jsonToVec3(getOrFail(sceneObjectJ, "v2Normal"));
+                
+                sceneObjects.emplace_back(TriangleWithVertexNormals(
+                    jsonToVec3(getOrFail(sceneObjectJ, "v0")),
+                    jsonToVec3(getOrFail(sceneObjectJ, "v1")),
+                    jsonToVec3(getOrFail(sceneObjectJ, "v2")),
+                    std::move(material),
+                    texCoordv0,
+                    texCoordv1,
+                    texCoordv2,
+                    {v0Normal, v1Normal, v2Normal}
+                ));
+            }else{
+                sceneObjects.emplace_back(TriangleWithConstantFaceNormal(
+                    jsonToVec3(getOrFail(sceneObjectJ, "v0")),
+                    jsonToVec3(getOrFail(sceneObjectJ, "v1")),
+                    jsonToVec3(getOrFail(sceneObjectJ, "v2")),
+                    std::move(material),
+                    texCoordv0,
+                    texCoordv1,
+                    texCoordv2
+                ));
+            }
         }else if(type == "sphere"){
             sceneObjects.emplace_back(Sphere(
                 jsonToVec3(getOrFail(sceneObjectJ, "center")),
@@ -430,16 +454,20 @@ Scene jsonFileToScene(std::string_view path){
             fail("Invalid shape");
         }
     }
-    return Scene(nBounces,
-        renderMode,
-        std::move(camera),
-        backgroundColor,
-        lights,
-        sceneObjects,
-        pathtracingSamplesPerPixel,
-        pathtracingApertureSamplesPerPixelSample,
-        pathtracingPointLightsamplesPerBounce,
-        pathtracingHemisphereSamplesPerBounce
+
+    return Renderer(
+        Scene(nBounces,
+            renderMode,
+            std::move(camera),
+            backgroundColor,
+            lights,
+            sceneObjects,
+            pathtracingSamplesPerPixel,
+            pathtracingApertureSamplesPerPixelSample,
+            pathtracingPointLightsamplesPerBounce,
+            pathtracingHemisphereSamplesPerBounce
+        ),
+        outputPathS
     );
 }
 
@@ -463,7 +491,7 @@ int main(int argc, char *argv[]) {
     MEASURE_TIME_START(wallTime);
 
     MEASURE_TIME_START(jsonTime);
-    Renderer renderer(jsonFileToScene(argv[1]), "out.ppm");
+    Renderer renderer = jsonFileToRenderer(argv[1]);
     MEASURE_TIME_END(jsonTime);
 
     MEASURE_TIME_START(renderTime);
