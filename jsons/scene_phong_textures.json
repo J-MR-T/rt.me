@@ -81,7 +81,11 @@
                             "isreflective":true,
                             "reflectivity":0.5,
                             "isrefractive":false,
-                            "refractiveindex":1.0 
+                            "refractiveindex":1.0 ,
+                            "txv0" : [0, 1],
+                            "txv1" : [1, 1],
+                            "txv2" : [0, 0],
+                            "texture": "textures/globe.ppm"
                         } 
                 },
                 {
