@@ -251,17 +251,21 @@ struct Vec3{
 // overload std::format/std::println for Vec3
 template <>
 struct std::formatter<Vec3> : std::formatter<std::string> {
-  auto format(const Vec3& v, format_context& ctx) const {
-    return formatter<string>::format(std::format("[{}, {}, {}]", v.x, v.y, v.z), ctx);
-  }
+    auto format(const Vec3& v, format_context& ctx) const {
+        return formatter<string>::format(std::format("[{}, {}, {}]", v.x, v.y, v.z), ctx);
+    }
 };
 
 /// fresnel effect with Schlick's approximation
-inline float_T schlickFresnel(float_T intensity, float_T LdotH){
-    return intensity + (1. - intensity) * std::pow(1.0f - LdotH, 5);
+/// takes either an angle or something "similar", e.g. the dot product of the normal with the half vector (see PrincipledBRDFMaterial)
+inline float_T schlickFresnelFactor(float_T angleEquivalent){
+    return std::pow(1.0f - angleEquivalent, 5);
 }
-inline Vec3 schlickFresnel(Vec3 color, float_T LdotH){
-    return Vec3(schlickFresnel(color.x, LdotH), schlickFresnel(color.y, LdotH), schlickFresnel(color.z, LdotH));
+inline float_T addWeightedSchlickFresnel(float_T intensity, float_T angleEquivalent){
+    return intensity + (1. - intensity) * schlickFresnelFactor(angleEquivalent);
+}
+inline Vec3 addWeightedSchlickFresnel(Vec3 color, float_T angleEquivalent){
+    return Vec3(addWeightedSchlickFresnel(color.x, angleEquivalent), addWeightedSchlickFresnel(color.y, angleEquivalent), addWeightedSchlickFresnel(color.z, angleEquivalent));
 }
 
 struct PPMWriter{
@@ -927,12 +931,12 @@ public:
 
             // Also calculate sheen contribution (disney sheen)
             Vec3 sheenColor = Vec3(1.).lerp(tint, sheenTint);
-            Vec3 sheenContribution = sheen * sheenColor * schlickFresnel(0., LdotH);
+            Vec3 sheenContribution = sheen * sheenColor * schlickFresnelFactor(LdotH);
 
             // Fundamentally microfacet based:
 
             // Fresnel term
-            Vec3 F = schlickFresnel(specularColor, LdotH);
+            Vec3 F = addWeightedSchlickFresnel(specularColor, LdotH);
 
             // Distribution term (GGX/Trowbridge-Reitz)
             float_T D = D_GGX_aniso(H, N, X, Y, ax, ay);
@@ -950,10 +954,10 @@ public:
         auto clearcoatBRDFContribution = [&] {
             float_T NdotH = std::max(epsilon, N.dot(H));
 
-            // Fixed clearcoat IOR of 1.5 gives F0 of 0.04
+            // Fixed clearcoat IOR of 1.5 gives F0 of 0.04 (glass-air interfaec)
             const float_T F0 = 0.04f;
             // Use the same Fresnel equation as specular but with fixed F0
-            float_T Fr = schlickFresnel(F0, LdotH);
+            float_T Fr = addWeightedSchlickFresnel(F0, LdotH);
 
             // TODO decide
 
@@ -1659,6 +1663,8 @@ struct Scene{
 
     ToneMapMode toneMapMode;
 
+    bool phongFresnel;
+
     std::vector<PointLight> pointLights;
 
     std::vector<SceneObject> objects;
@@ -1677,6 +1683,7 @@ struct Scene{
             std::unique_ptr<Camera> camera,
             Vec3 backgroundColor,
             ToneMapMode toneMapMode,
+            bool phongFresnel,
             std::vector<PointLight> lights,
             std::vector<SceneObject> objects,
             uint32_t pathtracingSamplesPerPixel,
@@ -1688,6 +1695,7 @@ struct Scene{
         camera(std::move(camera)),
         backgroundColor(backgroundColor),
         toneMapMode(toneMapMode),
+        phongFresnel(phongFresnel),
         pointLights(std::move(lights)),
         objects(std::move(objects)),
         pathtracingSamples(
@@ -1728,6 +1736,7 @@ struct Renderer{
         static constexpr std::string outputFilePath       = "out.ppm";
         static constexpr uint32_t nBounces                = 4;
         static constexpr ToneMapMode toneMapMode          = ToneMapMode::LOCAL_LINEAR;
+        static constexpr bool phongFresnel                = true;
         static constexpr float_T pointLightShadowSoftness = 0.;
         static constexpr float_T emissiveness             = 0.;
         static constexpr PhongMaterial defaultPhongMaterial   = PhongMaterial(Vec3(1,1,1), Vec3(1,1,1), 0.5, 0.5, 32, 0.0, 0.0, std::nullopt);
@@ -1787,7 +1796,7 @@ struct Renderer{
         float_T ks = material.ks;
         float_T specularExponentShinyness = material.specularExponent;
 
-        auto calculateSpecularHighlights = [&]() -> Vec3 {
+        auto calculateSpecularHighlights = [&] -> Vec3 {
             Vec3 specularSum(0.);
 
             for(const auto& light: scene.pointLights) {
@@ -1807,11 +1816,19 @@ struct Renderer{
             return specularSum;
         };
 
+        auto calculateReflectedColor = [&] -> Vec3 {
+            Vec3 reflectionDir = intersectionToShade.incomingRay->direction.reflect(intersectionToShade.surfaceNormal);
+            auto reflectionRay = Ray::createWithOffset(intersectionToShade.point, reflectionDir);
+
+            if (auto reflectionIntersection = traceRayToClosestSceneIntersection(reflectionRay)) {
+                return shadeBlinnPhong(*reflectionIntersection, bounces + 1, currentIOR);
+            }else{
+                return scene.backgroundColor;
+            }
+        };
+
         // Handle transparent (refractive) materials differently
         if (material.refractiveIndex.has_value()) {
-            // make sure to still have specular highlights on transparent objects
-            // these would be weighted by the objects transmissiveness, but as that doesnt exist, just add them for now
-            Vec3 finalColor = calculateSpecularHighlights();
             float_T materialIOR = *material.refractiveIndex;
 
             bool entering = intersectionToShade.incomingRay->direction.dot(intersectionToShade.surfaceNormal) < 0;
@@ -1838,9 +1855,27 @@ struct Renderer{
                 }
 
                 // tint the refraction by the diffuse color, to be able to make e.g. red glass
-                // TODO could add something like a density parameter to the material, to decide how much to tint, but for now, thats just encoded in the diffuse color
-                finalColor += refractedColor * diffuseColor;
-                return finalColor;
+                // TODO could add something like a density parameter to the material, to decide how much to tint (via lerp), but for now, thats just encoded in the diffuse color
+                refractedColor = refractedColor * diffuseColor;
+
+                // make sure to still have specular highlights on transparent objects
+                // these would be weighted by the objects transmissiveness, but as that doesnt exist, just add them for now
+                refractedColor += calculateSpecularHighlights();
+
+                // if fresnel is enabled, calculate the fresnel term
+                if(scene.phongFresnel){
+                    // this reflectivity is for looking straight at the surface, i.e. along the normal vector
+                    float_T baseReflectivity = std::pow((etaRatio - 1) / (etaRatio + 1), 2);
+
+                    float_T fresnelBlendAmount = addWeightedSchlickFresnel(baseReflectivity, cosTheta_i);
+
+                    // blend between the reflected and refracted color based on fresnel amount
+                    // but also give control to the user by utilizing the reflectivity: if reflectivity is zero, only refract
+                    auto reflectedColor = refractedColor.lerp(calculateReflectedColor(), material.reflectivity.value_or(0.));
+                    return refractedColor.lerp(reflectedColor, fresnelBlendAmount);
+                }else{
+                    return refractedColor;
+                }
             }else{
                 // in this case we have *total internal reflection*
                 // handle by simply going on with the normal lighting for now
@@ -1875,13 +1910,7 @@ struct Renderer{
         // Handle reflection if material is reflective
         // TODO could do fresnel here and for refractivity
         if(material.reflectivity.has_value()) {
-            Vec3 reflectionDir = intersectionToShade.incomingRay->direction.reflect(intersectionToShade.surfaceNormal);
-            auto reflectionRay = Ray::createWithOffset(intersectionToShade.point, reflectionDir);
-
-            Vec3 reflectedColor = scene.backgroundColor;
-            if (auto reflectionIntersection = traceRayToClosestSceneIntersection(reflectionRay)) {
-                reflectedColor = shadeBlinnPhong(*reflectionIntersection, bounces + 1, currentIOR);
-            }
+            Vec3 reflectedColor = calculateReflectedColor();
 
             color = color.lerp(reflectedColor, *material.reflectivity);
         }

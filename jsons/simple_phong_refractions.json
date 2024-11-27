@@ -1,6 +1,7 @@
 {
     "nbounces":8, 
     "rendermode":"phong",
+    "phongfresnel":true,
     "camera":
         { 
             "type":"pinhole", 
@@ -69,7 +70,7 @@
                             "diffusecolor":[0.9, 0.9, 0.9],
                             "specularcolor":[1.0,1.0,1.0],
                             "isreflective":true,
-                            "reflectivity":0.2,
+                            "reflectivity":0.8,
                             "isrefractive":true,
                             "refractiveindex":1.50
                         } 
@@ -86,7 +87,7 @@
                             "diffusecolor":[0.9, 0.9, 0.9],
                             "specularcolor":[1.0,1.0,1.0],
                             "isreflective":true,
-                            "reflectivity":0.2,
+                            "reflectivity":0.15,
                             "isrefractive":true,
                             "refractiveindex":1.00
                         } 

@@ -196,6 +196,7 @@ Renderer jsonFileToRenderer(std::string_view path){
     if(!sceneObjectsJ.is_array())
         fail("shapes is not an array");
     Vec3 backgroundColor    = jsonToVec3(getOrFail(sceneJ, "backgroundcolor"));
+    bool phongFresnel       = getOrElse(root, "phongfresnel", Defaults::phongFresnel);
 
     // map from path to texture, to deduplicate textures
     // shared pointers are a bit slow, and new/delete could be faster, but ownership is easier to track this way
@@ -250,6 +251,9 @@ Renderer jsonFileToRenderer(std::string_view path){
 
         if(toneMapMode == ToneMapMode::GLOBAL_LINEAR)
             fail("Global linear tone mapping is not supported in pathtracing mode");
+
+        if(root.contains("phongfresnel"))
+            fail("Phong Fresnel is not valid in pathtracing mode: All pathtraced materials are principled BRDFs which always incorporate fresnel");
     } else{
         fail("Invalid rendermode");
     }
@@ -485,6 +489,7 @@ Renderer jsonFileToRenderer(std::string_view path){
             std::move(camera),
             backgroundColor,
             toneMapMode,
+            phongFresnel,
             lights,
             sceneObjects,
             pathtracingSamplesPerPixel,
