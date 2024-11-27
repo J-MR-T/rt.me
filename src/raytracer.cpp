@@ -164,6 +164,8 @@ Renderer jsonFileToRenderer(std::string_view path){
         return findContained(std::forward<decltype(keys)>(keys)...);
     };
 
+    using Defaults = Renderer::Defaults;
+
     auto getOrElse = []<typename T>(const auto& j, const auto& key, const T& otherwise) -> T {
         if(!j.contains(key))
             return otherwise;
@@ -184,10 +186,10 @@ Renderer jsonFileToRenderer(std::string_view path){
 
     // === start actually parsing ===
 
-    std::string outputPathS = getOrElse(root, "outfile", std::string("out.ppm"));
+    std::string outputPathS = getOrElse(root, "outfile", Defaults::outputFilePath);
 
     json cameraJ            = getOrFail(root, "camera");
-    uint32_t nBounces       = getOrElse(root, "nbounces", 1);
+    uint32_t nBounces       = getOrElse(root, "nbounces", Defaults::nBounces);
     std::string renderModeS = getOrFail(root, "rendermode");
     json sceneJ             = getOrFail(root, "scene");
     json sceneObjectsJ      = getOrFail(sceneJ, "shapes");
@@ -203,6 +205,22 @@ Renderer jsonFileToRenderer(std::string_view path){
     uint32_t pathtracingApertureSamplesPerPixelSample = 0;
     uint32_t pathtracingPointLightsamplesPerBounce = 0;
     uint32_t pathtracingHemisphereSamplesPerBounce = 0;
+
+
+    // parse tone map mode
+    ToneMapMode toneMapMode = [&]{
+        if(!sceneJ.contains("tonemapmode"))
+            return Defaults::toneMapMode;
+
+        auto toneMapModeS = sceneJ["tonemapmode"];
+        if(toneMapModeS == "localLinear")
+            return ToneMapMode::LOCAL_LINEAR;
+        else if(toneMapModeS == "globalLinear")
+            return ToneMapMode::GLOBAL_LINEAR;
+        else
+            fail("Invalid tonemapmode");
+    }();
+
 
     // get render mode
     RenderMode renderMode;
@@ -228,9 +246,13 @@ Renderer jsonFileToRenderer(std::string_view path){
         
         // warn about hemispehre samples per bounce
         if(pathtracingHemisphereSamplesPerBounce > 1)
-            std::println(stderr, "Warning: Hemisphere samples per bounce > 1 is supported, but not recommended, as it will result in exponential time complexity. Use at your own peril.");
-    } else
+            std::println(stderr, "Warning: Hemisphere samples per bounce > 1 is supported, but not recommended, as it will result in exponential time complexity. Use at your own (computer's) peril.");
+
+        if(toneMapMode == ToneMapMode::GLOBAL_LINEAR)
+            fail("Global linear tone mapping is not supported in pathtracing mode");
+    } else{
         fail("Invalid rendermode");
+    }
 
 
     // get camera
@@ -280,7 +302,7 @@ Renderer jsonFileToRenderer(std::string_view path){
         if(type == "pointlight"){
             Vec3 position = jsonToVec3(getOrFail(lightJ, "position"));
             Vec3 intensityPerColor = jsonToVec3(getOrFail(lightJ, "intensity"));
-            float_T shadowSoftness = getOrElse(lightJ, "shadowSoftness", 0.);
+            float_T shadowSoftness = getOrElse(lightJ, "shadowSoftness", Defaults::pointLightShadowSoftness);
             if(shadowSoftness < 0)
                 fail("Shadow softness must be positive");
 
@@ -289,8 +311,7 @@ Renderer jsonFileToRenderer(std::string_view path){
 
             lights.emplace_back(position, intensityPerColor, shadowSoftness);
         }else{
-            // TODO area lights
-            fail("Invalid light type (if you're trying area lights: these are implemented as emissive objects - add an emissioncolor to an object instead)");
+            fail("Invalid light type (if you're trying area lights: these are implemented as emissive objects - add an `emissive` value to a material instead)");
         }
     }
 
@@ -338,15 +359,6 @@ Renderer jsonFileToRenderer(std::string_view path){
     };
 
     auto jsonToBRDFMaterial = [&](const auto& j) -> std::optional<PrincipledBRDFMaterial>{
-        // TODO use
-        //std::optional<float_T> reflectivity = getOrFail(j, "reflectivity");
-        //if(!getOrFail(j, "isreflective"))
-        //    reflectivity = std::nullopt;
-        //
-        //std::optional<float_T> refractiveIndex = getOrFail(j, "refractiveindex");
-        //if(!getOrFail(j, "isrefractive"))
-        //    refractiveIndex = std::nullopt;
-
         // warn if (some) keys are present that are specific to phong materials
         if(j.contains("specularcolor") || j.contains("specularexponent"))
             std::println(stderr, "Warning: Principled BRDF materials don't support specularcolor, specularexponent parameters - will be ignored");
@@ -363,11 +375,11 @@ Renderer jsonFileToRenderer(std::string_view path){
         return PrincipledBRDFMaterial(
             jsonToVec3(getOrFail(j, "diffusecolor", "basecolor")),
             texture,
-            (float_T) getOrElse(j,  "emissive", 0.),
-            (float_T) getOrFail(j,  "kd", "basecolorintensity"),
+            (float_T) getOrElse(j, "emissive", Defaults::emissiveness),
+            (float_T) getOrFail(j, "kd", "basecolorintensity"),
             (float_T) getOrFail(j, "metallic", "metallicness"),
             (float_T) getOrFail(j, "subsurface"),
-            (float_T) getOrFail(j,  "ks", "specular"),
+            (float_T) getOrFail(j, "ks", "specular"),
             (float_T) getOrFail(j, "roughness"),
             (float_T) getOrFail(j, "speculartint"),
             (float_T) getOrFail(j, "anisotropic"),
@@ -389,19 +401,22 @@ Renderer jsonFileToRenderer(std::string_view path){
             if(renderMode == RenderMode::BINARY && sceneObjectJ.contains("material")){
                 fail("Binary mode doesn't support materials");
             }else if(renderMode == RenderMode::PHONG){
-                PhongMaterial phongMaterial = getOrElse(sceneObjectJ, "material", std::optional<json>()).and_then(jsonToPhongMaterial).value_or(defaultPhongMaterial);
+                PhongMaterial phongMaterial = getOrElse(sceneObjectJ, "material", std::optional<json>()).and_then(jsonToPhongMaterial).value_or(Defaults::defaultPhongMaterial);
                 return Material(phongMaterial);
-            }else{
-                PrincipledBRDFMaterial principledBRDFMaterial = getOrElse(sceneObjectJ, "material", std::optional<json>()).and_then(jsonToBRDFMaterial).value_or(defaultPrincipledBRDFMaterial);
+            }else if(renderMode == RenderMode::PATHTRACE || renderMode == RenderMode::PATHTRACE_INCREMENTAL){
+                PrincipledBRDFMaterial principledBRDFMaterial = getOrElse(sceneObjectJ, "material", std::optional<json>()).and_then(jsonToBRDFMaterial).value_or(Defaults::defaultPrincipledBRDFMaterial);
                 return Material(principledBRDFMaterial);
+            }else{
+                // one of the debug render modes -> any material, default phong is simplest
+                return Material(Defaults::defaultPhongMaterial);
             }
         }();
 
         if(type == "triangle"){
             // triangles have fully customizable texture mapping
-            Vec2 texCoordv0;
-            Vec2 texCoordv1;
-            Vec2 texCoordv2;
+            Vec2 texCoordv0(0., 0.);
+            Vec2 texCoordv1(0., 0.);
+            Vec2 texCoordv2(0., 0.);
             if(sceneObjectJ.contains("material") && material.hasTexture()){
                 // get triangle text coords
                 auto materialJ = sceneObjectJ["material"];
@@ -469,6 +484,7 @@ Renderer jsonFileToRenderer(std::string_view path){
             renderMode,
             std::move(camera),
             backgroundColor,
+            toneMapMode,
             lights,
             sceneObjects,
             pathtracingSamplesPerPixel,
