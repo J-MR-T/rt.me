@@ -107,7 +107,7 @@
                             "roughness" : 1.0,
                             "speculartint": 0.0,
                             "anisotropic": 0.0,
-                            "sheen": 1.0,
+                            "sheen": 30.0,
                             "sheentint": 0.0,
                             "clearcoat": 0.0,
                             "clearcoatgloss": 0.0
@@ -127,7 +127,7 @@
                             "roughness" : 1.0,
                             "speculartint": 0.0,
                             "anisotropic": 0.0,
-                            "sheen": 1.0,
+                            "sheen": 30.0,
                             "sheentint": 1.0,
                             "clearcoat": 0.0,
                             "clearcoatgloss": 0.0
@@ -140,7 +140,7 @@
                     "material":
                         { 
                             "ks":1.0, 
-                            "kd":0.5, 
+                            "kd":0.2, 
                             "diffusecolor":[1,0,0],
                             "subsurface": 0.0,
                             "metallic": 0.0,
@@ -160,7 +160,7 @@
                     "material":
                         { 
                             "ks":1.0, 
-                            "kd":0.5, 
+                            "kd":0.2, 
                             "diffusecolor":[1,0,0],
                             "subsurface": 0.0,
                             "metallic": 0.0,
@@ -180,7 +180,7 @@
                     "material":
                         { 
                             "ks":1.0, 
-                            "kd":0.5, 
+                            "kd":0.2, 
                             "diffusecolor":[1,0,0],
                             "subsurface": 0.0,
                             "metallic": 1.0,
@@ -207,8 +207,8 @@
                             "roughness" : 0.70,
                             "speculartint": 0.2,
                             "anisotropic": 0.0,
-                            "sheen": 0.0,
-                            "sheentint": 0.0,
+                            "sheen": 5.0,
+                            "sheentint": 1.0,
                             "clearcoat": 0.0,
                             "clearcoatgloss": 0.0
                         } 
@@ -220,16 +220,16 @@
                     "material":
                         { 
                             "ks":1.0, 
-                            "kd":0.0, 
+                            "kd":0.2, 
                             "diffusecolor":[1,0,0],
                             "subsurface": 0.0,
-                            "metallic": 1.0,
-                            "roughness" : 0.65,
-                            "speculartint": 0.2,
+                            "metallic": 0.0,
+                            "roughness" : 0.05,
+                            "speculartint": 0.0,
                             "anisotropic": 0.0,
                             "sheen": 0.0,
                             "sheentint": 0.0,
-                            "clearcoat": 1.0,
+                            "clearcoat": 4.0,
                             "clearcoatgloss": 1.0
                         } 
                 },
@@ -243,14 +243,14 @@
                             "kd":0.0, 
                             "diffusecolor":[1,0,0],
                             "subsurface": 0.0,
-                            "metallic": 0.5,
-                            "roughness" : 0.05,
+                            "metallic": 1.0,
+                            "roughness" : 0.25,
                             "speculartint": 0.0,
-                            "anisotropic": 0.0,
-                            "sheen": 0.0,
-                            "sheentint": 0.0,
-                            "clearcoat": 0.0,
-                            "clearcoatgloss": 0.0
+                            "anisotropic": 0.9,
+                            "sheen": 3.0,
+                            "sheentint": 1.0,
+                            "clearcoat": 1.0,
+                            "clearcoatgloss": 1.0
                         } 
                 },
                 {
@@ -267,8 +267,8 @@
                             "roughness" : 0.65,
                             "speculartint": 0.2,
                             "anisotropic": 0.9,
-                            "sheen": 0.0,
-                            "sheentint": 0.0,
+                            "sheen": 5.0,
+                            "sheentint": 1.0,
                             "clearcoat": 0.0,
                             "clearcoatgloss": 0.0
                         } 
@@ -284,12 +284,12 @@
                             "diffusecolor":[1,0,0],
                             "subsurface": 0.0,
                             "metallic": 1.0,
-                            "roughness" : 0.65,
+                            "roughness" : 0.7,
                             "speculartint": 0.2,
-                            "anisotropic": 0.0,
-                            "sheen": 0.0,
-                            "sheentint": 0.0,
-                            "clearcoat": 1.0,
+                            "anisotropic": 0.4,
+                            "sheen": 5.0,
+                            "sheentint": 1.0,
+                            "clearcoat": 0.2,
                             "clearcoatgloss": 1.0
                         } 
                 }

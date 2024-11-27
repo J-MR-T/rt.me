@@ -1,5 +1,5 @@
 {
-    "nbounces":3, 
+    "nbounces":5, 
     "rendermode":"pathtrace",
     "pathtracingOpts" : {
         "samplesPerPixel" : 4,
@@ -23,6 +23,13 @@
         { 
             "backgroundcolor": [0,0,0],
             "lightsources":[ 
+                { 
+                    "type":"pointlight", 
+                    "position":[0.7, 0.9, 1.75],
+                    "intensity":[0.0,0.1,0.3],
+                    "shadowSoftness":0.05,
+                    "falloff": 1.0
+                }
             ], 
             "shapes":[ 
                 { 
@@ -41,7 +48,7 @@
                             "anisotropic": 0.0,
                             "sheen": 0.0,
                             "sheentint": 0.0,
-                            "clearcoat": 0.0,
+                            "clearcoat": 1.0,
                             "clearcoatgloss": 0.0,
                             "texture":"textures/globe.ppm"
                         } 
@@ -68,48 +75,6 @@
                             "reflectivity":0.5,
                             "isrefractive":false,
                             "refractiveindex":1.0
-                        } 
-                },
-                { 
-                    "type":"sphere", 
-                    "center": [-0.15, 0.4, 1.25],
-                    "radius":0.15, 
-                    "material":
-                        { 
-                            "ks":0.5, 
-                            "kd":0.5, 
-                            "diffusecolor":[1,1,1],
-                            "speculartint": 0.0,
-                            "subsurface": 0.0,
-                            "metallic": 0.0,
-                            "roughness" : 0.001,
-                            "anisotropic": 0.0,
-                            "sheen": 0.0,
-                            "sheentint": 0.0,
-                            "clearcoat": 0.0,
-                            "clearcoatgloss": 0.0,
-                            "emissive": 0.0
-                        } 
-                },
-                { 
-                    "type":"sphere", 
-                    "center": [0.15, 0.4, 1.25],
-                    "radius":0.15, 
-                    "material":
-                        { 
-                            "ks":0.0, 
-                            "kd":1.0, 
-                            "diffusecolor":[1,1,1],
-                            "speculartint": 0.0,
-                            "subsurface": 0.0,
-                            "metallic": 0.0,
-                            "roughness" : 1.0,
-                            "anisotropic": 0.0,
-                            "sheen": 0.0,
-                            "sheentint": 0.0,
-                            "clearcoat": 1.0,
-                            "clearcoatgloss": 1.0,
-                            "emissive": 0.0
                         } 
                 },
                 { 
@@ -311,7 +276,7 @@
                             "reflectivity":0.25,
                             "isrefractive":false,
                             "refractiveindex":1.0,
-                            "emissive": 45.0
+                            "emissive": 25.0
                         } 
                 },
                 { 
@@ -339,7 +304,7 @@
                             "reflectivity":0.25,
                             "isrefractive":false,
                             "refractiveindex":1.0,
-                            "emissive": 45.0
+                            "emissive": 25.0
                         } 
                 },
                 { 

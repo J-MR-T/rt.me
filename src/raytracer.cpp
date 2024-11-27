@@ -282,6 +282,12 @@ Renderer jsonFileToRenderer(std::string_view path){
             (float_T) getOrFail(cameraJ,  "exposure")
         );
     }else if(cameraType == "thinlens"){
+        if(renderMode == RenderMode::BINARY)
+            fail("Binary mode doesn't support thin lens cameras");
+
+        if(renderMode == RenderMode::PHONG)
+            std::println(stderr, "Warning: Thing lens cameras are not supported in phong mode. You will get an image, but because phong does not sample the same pixel multiple times, it will not look right. Use at your discretion.");
+
         camera = std::make_unique<SimplifiedThinLensCamera>(
             jsonToVec3(getOrFail(cameraJ, "position")),
             jsonToVec3(getOrFail(cameraJ, "lookAt")),
@@ -298,24 +304,34 @@ Renderer jsonFileToRenderer(std::string_view path){
 
     std::vector<PointLight> lights;
 
-    json lightsJ = getOrFail(sceneJ, "lightsources");
-    if(!lightsJ.is_array())
-        fail("lightsources is not an array");
-    for(auto& lightJ: lightsJ){
-        std::string type = getOrFail(lightJ, "type");
-        if(type == "pointlight"){
-            Vec3 position = jsonToVec3(getOrFail(lightJ, "position"));
-            Vec3 intensityPerColor = jsonToVec3(getOrFail(lightJ, "intensity"));
-            float_T shadowSoftness = getOrElse(lightJ, "shadowSoftness", Defaults::pointLightShadowSoftness);
-            if(shadowSoftness < 0)
-                fail("Shadow softness must be positive");
+    // binary and pathtrace both dont need lights, so this is optional
+    if(sceneJ.contains("lightsources")){
+        if(renderMode == RenderMode::BINARY)
+            fail("Binary mode doesn't support light sources");
 
-            if(renderMode == RenderMode::PHONG && shadowSoftness != 0.)
-                fail("Shadow softness > 0 only supported in pathtracing mode");
+        json lightsJ = sceneJ["lightsources"];
 
-            lights.emplace_back(position, intensityPerColor, shadowSoftness);
-        }else{
-            fail("Invalid light type (if you're trying area lights: these are implemented as emissive objects - add an `emissive` value to a material instead)");
+        if(!lightsJ.is_array())
+            fail("lightsources is not an array");
+
+        for(auto& lightJ: lightsJ){
+            std::string type = getOrFail(lightJ, "type");
+            if(type == "pointlight"){
+                Vec3 position = jsonToVec3(getOrFail(lightJ, "position"));
+                Vec3 intensityPerColor = jsonToVec3(getOrFail(lightJ, "intensity"));
+                float_T shadowSoftness = getOrElse(lightJ, "shadowSoftness", Defaults::pointLightShadowSoftness);
+                if(shadowSoftness < 0)
+                    fail("Shadow softness must be positive");
+
+                if(renderMode == RenderMode::PHONG && shadowSoftness != 0.)
+                    fail("Shadow softness > 0 only supported in pathtracing mode");
+
+                float_T falloff = getOrElse(lightJ, "falloff", Defaults::pointLightFalloff);
+
+                lights.emplace_back(position, intensityPerColor, shadowSoftness, falloff);
+            }else{
+                fail("Invalid light type (if you're trying area lights: these are implemented as emissive objects - add an `emissive` value to a material instead)");
+            }
         }
     }
 
@@ -518,15 +534,13 @@ int main(int argc, char *argv[]) {
 
 #define MEASURED_TIME_AS_SECONDS(point, iterations) std::chrono::duration_cast<std::chrono::duration<double>>(point ## _end - point ## _start).count()/(static_cast<double>(iterations))
 
-    MEASURE_TIME_START(wallTime);
-
     MEASURE_TIME_START(jsonTime);
     Renderer renderer = jsonFileToRenderer(argv[1]);
     MEASURE_TIME_END(jsonTime);
 
     MEASURE_TIME_START(renderTime);
 
-    // "convert" render mode to constexpr - unfortunate boiler plate, but this is the only way to template this
+    // "convert" render mode to constexpr - unfortunate boiler plate, but this is the only way to template this, and that has performance benefits
     if(renderer.scene.renderMode == RenderMode::BINARY)
         renderer.render<RenderMode::BINARY>();
     else if(renderer.scene.renderMode == RenderMode::PHONG)
@@ -546,9 +560,10 @@ int main(int argc, char *argv[]) {
 
     MEASURE_TIME_END(renderTime);
 
-    MEASURE_TIME_END(wallTime);
+    auto jsonSeconds = MEASURED_TIME_AS_SECONDS(jsonTime, 1);
+    auto renderSeconds = MEASURED_TIME_AS_SECONDS(renderTime, 1);
 
-    std::println("Timing:\n- Wall: {}\n- Json to Scene: {}\n- Render: {}", MEASURED_TIME_AS_SECONDS(wallTime, 1), MEASURED_TIME_AS_SECONDS(jsonTime, 1), MEASURED_TIME_AS_SECONDS(renderTime, 1));
+    std::println(stderr, "Timing:\n- Wall: {}\n- Json to Scene: {}\n- Render: {}", jsonSeconds + renderSeconds, jsonSeconds, renderSeconds);
 
     return EXIT_SUCCESS;
 }

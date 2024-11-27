@@ -20,7 +20,8 @@
                 { 
                     "type":"pointlight", 
                     "position":[0, 1.0, 0.5], 
-                    "intensity":[0.75, 0.75, 0.75] 
+                    "intensity":[0.75, 0.75, 0.75] ,
+                    "falloff": 0.0
                 }
             ], 
             "shapes":[ 
