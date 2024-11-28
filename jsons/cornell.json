@@ -1,6 +1,7 @@
 {
     "nbounces":5, 
     "rendermode":"pathtrace",
+    "outfile": "cornell.ppm",
     "pathtracingOpts" : {
         "samplesPerPixel" : 4,
         "apertureSamplesPerPixelSample" : 1,

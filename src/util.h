@@ -220,7 +220,7 @@ struct Vec3{
         return incomingDirection - normal * 2 * (incomingDirection.dot(normal));
     }
 
-    // === static helpers ===
+    // === static helper ===
 
     static std::pair</* tangent */ Vec3, /* bitangent */ Vec3> createOrthonormalBasis(const Vec3& N) {
         assert(N == N.normalized() && "N must be a normal vector");
@@ -237,8 +237,6 @@ struct Vec3{
 
         assert(X == X.normalized() && "X must be normalized");
         assert(Y == Y.normalized() && "Y must be normalized");
-
-        // For debugging, these assertions should now pass
         assert(std::abs(X.dot(Y)) < epsilon && "X and Y must be orthogonal");
         assert(std::abs(N.dot(Y)) < epsilon && "N and Y must be orthogonal");
         assert(std::abs(N.dot(X)) < epsilon && "N and X must be orthogonal");
@@ -537,6 +535,7 @@ struct Color8Bit{
 struct Texture{
 private:
     uint32_t width, height;
+    // store textures in 8-bit color format, saves 4x memory compared to float
     std::vector<Color8Bit> pixels;
 
 public:
@@ -1683,7 +1682,7 @@ struct Scene{
     struct {
         uint32_t samplesPerPixel;
         uint32_t apertureSamplesPerPixelSample;
-        uint32_t pointLightsamplesPerBounce;
+        uint32_t pointLightSamplesPerBounce;
         /// be aware, that these are the samples that will result in exponentially more rays
         /// there is almost no reason to use this higher than 1, more samples per pixel is the better monte carlo answer to this
         uint32_t hemisphereSamplesPerBounce;
@@ -1699,7 +1698,7 @@ struct Scene{
             std::vector<SceneObject> objects,
             uint32_t pathtracingSamplesPerPixel,
             uint32_t pathtracingApertureSamplesPerPixelSample,
-            uint32_t pathtracingPointLightsamplesPerBounce,
+            uint32_t pathtracingPointLightSamplesPerBounce,
             uint32_t pathtracingHemisphereSamplesPerBounce)
         : nBounces(nBounces),
         renderMode(renderMode),
@@ -1712,7 +1711,7 @@ struct Scene{
         pathtracingSamples(
             pathtracingSamplesPerPixel,
             pathtracingApertureSamplesPerPixelSample,
-            pathtracingPointLightsamplesPerBounce,
+            pathtracingPointLightSamplesPerBounce,
             pathtracingHemisphereSamplesPerBounce
         ){ }
 
@@ -1752,7 +1751,7 @@ struct Renderer{
         static constexpr float_T pointLightFalloff        = 0.; // dont let point lights fall off with distance by default
         static constexpr float_T emissiveness             = 0.;
         static constexpr PhongMaterial defaultPhongMaterial   = PhongMaterial(Vec3(1,1,1), Vec3(1,1,1), 0.5, 0.5, 32, 0.0, 0.0, std::nullopt);
-        static constexpr PrincipledBRDFMaterial defaultPrincipledBRDFMaterial = PrincipledBRDFMaterial(Vec3(1.), std::nullopt, 0., 1., 0., 0., 0.5, 1., 0., 1., 0., 0., 0., 0.);
+        static constexpr PrincipledBRDFMaterial defaultPrincipledBRDFMaterial = PrincipledBRDFMaterial(Vec3(1.), std::nullopt, 0., 1., 0., 0., 0.5, 1., 0., 0., 0., 0., 0., 0.);
 
     };
 
@@ -2034,9 +2033,7 @@ private:
         // Add specular for all materials
         color += calculateSpecularHighlights();
 
-
         // Handle reflection if material is reflective
-        // TODO could do fresnel here and for refractivity
         if(material.reflectivity.has_value()) {
             Vec3 reflectedColor = calculateReflectedColor();
 
@@ -2254,16 +2251,18 @@ private:
         if(!scene.pointLights.empty()){
             // sample point lights explicitly, because they are infinitessimally small, they can never be hit by a random ray (and are thus also not part of the BVH)
             // luckily, the pdf of the dirac delta distribution representing these cancels out with the light intensity of the point light itself, so we can simply add it, if the light is not in shadow
-            // we could just sample all point lights for every bounce, but thats a bit wasteful again for the later bounces
-            // -> randomly pick one, then compensate for that choice by multiplying with the number of point lights
-            const auto& light = scene.randomPointLight();
 
             // optionally sample each light source multiple times
             // not strictly necessary because of monte carlo - we're sampling each pixel multiple times anyway
             // but this gives greater control, although it should be 1 in most cases
             Vec3 accumulatedContributions(0.);
 
-            for(unsigned lightSampleNum = 0; lightSampleNum < scene.pathtracingSamples.pointLightsamplesPerBounce; lightSampleNum++){
+            for(unsigned lightSampleNum = 0; lightSampleNum < scene.pathtracingSamples.pointLightSamplesPerBounce; lightSampleNum++){
+                // we could just sample all point lights for every bounce, but thats a bit wasteful again for the later bounces
+                // -> randomly pick one (pointLightSamplesPerBounce defaults to 1), then compensate for that choice by multiplying with the number of point lights
+                // can adjust the convergence rate for point lights by changing the number of samples ber bounce
+                const auto& light = scene.randomPointLight();
+
                 // permute the origin randomly if the light has some amount of softness
                 Vec3 intersectionOriginPlusJitter = intersection.point + Vec3(randomFloat() - 0.5, randomFloat() - 0.5, randomFloat() - 0.5) * light.shadowSoftness;
                 // the jitter here is equal in all directions which is not ideal, but good enough. Could improve this by jittering around the tangent (X) and bitangent (Y)
@@ -2286,7 +2285,7 @@ private:
             // compensate for only sampling one light
             accumulatedContributions *= scene.pointLights.size();
             // compensate for the number of samples
-            accumulatedContributions /= scene.pathtracingSamples.pointLightsamplesPerBounce;
+            accumulatedContributions /= scene.pathtracingSamples.pointLightSamplesPerBounce;
 
             overallColor += accumulatedContributions;
         }

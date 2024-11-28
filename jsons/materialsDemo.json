@@ -1,6 +1,7 @@
 {
     "nbounces":6, 
     "rendermode":"pathtrace",
+    "outfile": "rendersOfNote/materialsDemo.ppm",
     "pathtracingOpts" : {
         "samplesPerPixel" : 4,
         "apertureSamplesPerPixelSample" : 1,

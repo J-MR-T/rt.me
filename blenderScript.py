@@ -88,6 +88,10 @@ class BlenderSceneExporter:
                 converted_path = self._convert_texture_to_ppm(texture_path)
                 if converted_path:
                     material_data["texture"] = converted_path
+                else:
+                    raise RuntimeError(f"Failed to convert texture: {str(texture_path)}/{str(converted_path)}")
+            else:
+                raise RuntimeError(f"Failed to find texture: {str(texture_path)}")
                     
         return material_data
         
@@ -266,7 +270,7 @@ class BlenderSceneExporter:
             
         # Get camera transformation data
         cam_matrix = camera.matrix_world
-        cam_loc = cam_matrix.to_translation()
+        cam_loc = cam_matrix.to_translation() @ self.invFixTransform
         cam_rot = cam_matrix.to_quaternion()
         
         return {
@@ -353,5 +357,6 @@ def export_scene(filepath: str) -> None:
 
 if __name__ == "__main__":
     export_scene('/tmp/scene.json')
+
 
 

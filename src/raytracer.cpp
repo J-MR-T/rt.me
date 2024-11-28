@@ -71,9 +71,6 @@ Texture readPPMTexture(std::string_view path){
     if(!(textureIfstream >> height))
         fail("Invalid height");
 
-    if(width != height)
-        std::println(stderr, "Warning: non-square textures are not supported - use at your own risk");
-
     checkAndSkipWhitespaceComments();
 
     // read maxval as ascii
@@ -135,7 +132,7 @@ Renderer jsonFileToRenderer(std::string_view path){
     jsonIfstream >> root;
 
     // on failure, just exit
-    auto fail = [] [[noreturn]] (auto message)  {
+    auto fail = [] [[noreturn]] (auto message) {
         std::println(stderr, "Invalid Json: {}", message);
         std::exit(EXIT_FAILURE);
     };
@@ -204,7 +201,7 @@ Renderer jsonFileToRenderer(std::string_view path){
 
     uint32_t pathtracingSamplesPerPixel = 0;
     uint32_t pathtracingApertureSamplesPerPixelSample = 0;
-    uint32_t pathtracingPointLightsamplesPerBounce = 0;
+    uint32_t pathtracingPointLightSamplesPerBounce = 0;
     uint32_t pathtracingHemisphereSamplesPerBounce = 0;
 
 
@@ -240,7 +237,7 @@ Renderer jsonFileToRenderer(std::string_view path){
 
         pathtracingSamplesPerPixel = getOrFail(pathtracingOpts, "samplesPerPixel");
         pathtracingApertureSamplesPerPixelSample = getOrFail(pathtracingOpts, "apertureSamplesPerPixelSample");
-        pathtracingPointLightsamplesPerBounce = getOrFail(pathtracingOpts, "pointLightSamplesPerBounce");
+        pathtracingPointLightSamplesPerBounce = getOrFail(pathtracingOpts, "pointLightSamplesPerBounce");
         pathtracingHemisphereSamplesPerBounce = getOrFail(pathtracingOpts, "hemisphereSamplesPerBounce");
         if(getOrFail(pathtracingOpts, "incremental"))
             renderMode = RenderMode::PATHTRACE_INCREMENTAL;
@@ -327,6 +324,9 @@ Renderer jsonFileToRenderer(std::string_view path){
                     fail("Shadow softness > 0 only supported in pathtracing mode");
 
                 float_T falloff = getOrElse(lightJ, "falloff", Defaults::pointLightFalloff);
+
+                if(falloff < 0 || falloff > 1)
+                    fail("Light falloff must be in [0,1]");
 
                 lights.emplace_back(position, intensityPerColor, shadowSoftness, falloff);
             }else{
@@ -510,7 +510,7 @@ Renderer jsonFileToRenderer(std::string_view path){
             sceneObjects,
             pathtracingSamplesPerPixel,
             pathtracingApertureSamplesPerPixelSample,
-            pathtracingPointLightsamplesPerBounce,
+            pathtracingPointLightSamplesPerBounce,
             pathtracingHemisphereSamplesPerBounce
         ),
         outputPathS

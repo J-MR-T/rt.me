@@ -1,6 +1,7 @@
 {
     "rendermode": "pathtrace",
     "outfile" : "temp/withoutVNorms.ppm",
+    "nbounces" : 1,
     "camera": {
         "type": "pinhole",
         "width": 1920,
@@ -42,7 +43,7 @@
                     0.5079168677330017,
                     0.2078404724597931
                 ],
-                "shadowSoftness": 0.55
+                "shadowSoftness": 1.1
             }
         ],
         "shapes": [

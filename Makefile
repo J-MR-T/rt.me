@@ -4,7 +4,7 @@ CXX=g++
 OUT=raytracer
 
 # -Ofast is ~10% fatser than -O3, and we dont care so much about fp precision
-CXXFLAGS=-Wall -Wextra -Wpedantic -Ofast -std=c++2b -I./include -fopenmp -fopenacc
+CXXFLAGS=-Wall -Wextra -Wpedantic -Wunused-result -Ofast -std=c++2b -I./include -fopenmp -fopenacc
 DEBUGFLAGS=-fsanitize=address -fsanitize=undefined -fsanitize=leak -O0 -g
 
 SOURCES=$(wildcard src/*.cpp)
