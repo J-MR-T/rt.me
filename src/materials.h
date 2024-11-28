@@ -98,8 +98,6 @@ struct PrincipledBRDFMaterial : MaterialBase{
     float_T clearcoat;
     float_T clearcoatGloss;
 
-    // TODO explain V, L, H, N, X, Y terminology
-
     constexpr PrincipledBRDFMaterial(
             Vec3 diffuseColor,
             std::optional<std::shared_ptr<Texture>> texture,
@@ -152,8 +150,17 @@ private:
     float_T specularWeight;
     float_T clearcoatWeight;
 
-    // this seems to be the standard value from the literature
+    // standard value that Disney use, can also be found in other papers
     static constexpr float_T fixedClearcoatRoughness = 0.25;
+
+    // NOTE:
+    // In the following implementation, the vectors V, L, N, H, X, and Y are used.
+    // - V: the viewing direction pointing from the intersection we're shading to where the light is reflected *to*
+    // - L: the light direction pointing from the intersection we're shading to where the light is coming *from*
+    // - N: the normal at the intersection point
+    // - H: The half vector between V and L: H = (V + L) / |V + L|
+    // - X: The tangent vector in the tangent space orthonormal basis N, X, Y
+    // - Y: The bitangent vector in the tangent space orthonormal basis N, X, Y
 
     // === Utility functions ===
 
@@ -162,7 +169,7 @@ private:
     static float_T safe_sqrt(float_T x) { return std::sqrt(std::max(epsilon, x)); }
 
     // optics
-    // (also see schlickFresnel)
+    // (also see schlickFresnelFactor in util.h)
     static float_T luminance(const Vec3& color) {
         return std::max(epsilon, color.dot(Vec3(0.3f, 0.6f, 0.1f)));
     }
@@ -176,9 +183,7 @@ private:
     }
 
     // GGX (Trowbridge-Reitz) Distribution Function
-    static float_T D_GGX_aniso(const Vec3& H, const Vec3& N,
-                              const Vec3& X, const Vec3& Y,
-                              float_T ax, float_T ay) {
+    static float_T D_GGX_anisotropic(const Vec3& H, const Vec3& N, const Vec3& X, const Vec3& Y, float_T ax, float_T ay) {
         float_T NdotH = std::max(epsilon, N.dot(H));
 
         // Early exit if normal and half vector are perpendicular
@@ -200,14 +205,13 @@ private:
 
     /// Calculate anisotropic roughness parameters
     static std::pair<float_T, float_T> calculateAnisotropicParams(float_T roughness, float_T anisotropic) {
-        // TODO maybe get rid of parameters and make non-static?
-        roughness = std::max(0.001f, roughness);
+        roughness = std::max((float_T) 0.001f, roughness);
         
         // Modify how anisotropic affects the aspect ratio
         // Map anisotropic [0,1] to a more useful range for aspect ratio
         float_T t = anisotropic * 0.9f;  // Keep maximum anisotropy slightly below 1
-        float_T ax = std::max(0.001f, roughness * (1.0f + t));
-        float_T ay = std::max(0.001f, roughness * (1.0f - t));
+        float_T ax = std::max((float_T) 0.001f, roughness * (1.0f + t));
+        float_T ay = std::max((float_T) 0.001f, roughness * (1.0f - t));
         return {ax, ay};
     }
 
@@ -216,10 +220,6 @@ private:
         float_T u2 = randomFloat();
 
         auto [ax, ay] = calculateAnisotropicParams(roughness, anisotropic);
-
-        // Transform V to tangent space
-        // TODO what was this for?
-        //Vec3 Vt = Vec3(V.dot(X), V.dot(Y), V.dot(N));
 
         // Sample visible normal distribution
         float_T phi = 2.0f * PI * u1;
@@ -259,9 +259,6 @@ private:
         return 1. / (NdotV + safe_sqrt(a + b - a * b));
     }
 
-    // TODO clean up all of the clamps and epsilons
-
-
 public:
     struct BRDFSample {
         Vec3 direction;  // Sampled direction in world space
@@ -269,7 +266,14 @@ public:
     };
 
     // Main sampling function
-    BRDFSample sampleBRDF(const Vec3& V, const Vec3& N, const Vec3& X, const Vec3& Y) const {
+    BRDFSample sampleBRDF(const Vec3& view, const Vec3& normal, const Vec3& tangent, const Vec3& bitangent) const {
+        // full variable names for the caller
+        // but the maths is simpler to understand with the shorter names (explained in the NOTE above), so we use them here
+        const Vec3& V = view;
+        const Vec3& N = normal;
+        const Vec3& X = tangent;
+        const Vec3& Y = bitangent;
+
         BRDFSample sample;
 
         float_T rand = randomFloat();
@@ -314,26 +318,27 @@ public:
         float_T NdotH = std::max(epsilon, N.dot(H));
         float_T VdotH = std::max(epsilon, V.dot(H));
 
-        float_T specularPdf = [&H, &N, &X, &Y, &NdotH, &VdotH, this]{
+        float_T specularPdf = [&H, &N, &X, &Y, &NdotH, &VdotH, this] -> float_T{
             auto [ax, ay] = calculateAnisotropicParams(roughness, anisotropic);
 
             // Calculate the GGX distribution term
-            float_T D = D_GGX_aniso(H, N, X, Y, ax, ay);
+            float_T D = D_GGX_anisotropic(H, N, X, Y, ax, ay);
 
             // The PDF for GGX importance sampling is:
             // pdf = D * NdotH / (4 * VdotH)
             // This comes from the Jacobian of the half-vector transformation
 
             if (VdotH < epsilon || NdotH < epsilon) {
-                return 0.0f;
+                return 0.;
             }
 
             float_T pdf = (D * NdotH) / (4.0f * VdotH);
 
-            return std::clamp(pdf, epsilon, 1e8f);
+            // numerical stability
+            return std::clamp(pdf, epsilon, (float_T) 1e8);
         }();
 
-        float_T clearcoatPdf = [&VdotH, &NdotH, this]{
+        float_T clearcoatPdf = [&VdotH, &NdotH, this] -> float_T{
             // Clearcoat uses GTR1 distribution with fixed roughness
             // interpolated based on clearcoatGloss
             float_T alpha = std::lerp(0.1f, 0.001f, clearcoatGloss);
@@ -342,12 +347,12 @@ public:
             float_T D = GTR1(NdotH, alpha);
 
             if (VdotH < epsilon || NdotH < epsilon) {
-                return 0.0f;
+                return 0.;
             }
 
             // Same jacobian as specular
             float_T pdf = D * NdotH / (4.0f * VdotH);
-            return std::clamp(pdf, epsilon, 1e8f);
+            return std::clamp(pdf, epsilon, (float_T) 1e8);
         }();
 
         // Combine PDFs using balance heuristic
@@ -358,10 +363,14 @@ public:
         return sample;
     }
 
-    // TODO rename/document params (also for sample)
-
     // Combined BRDF evaluation
-    Vec3 evaluateBRDF(const Vec2& textureCoords, const Vec3& V, const Vec3& L, const Vec3& X, const Vec3& Y, const Vec3& N) const {
+    Vec3 evaluateBRDF(const Vec2& textureCoords, const Vec3& view, const Vec3& incomingLight, const Vec3& normal, const Vec3& tangent, const Vec3& bitangent) const {
+        const Vec3& V = view;
+        const Vec3& L = incomingLight;
+        const Vec3& N = normal;
+        const Vec3& X = tangent;
+        const Vec3& Y = bitangent;
+
         float_T NdotL = N.dot(L);
         float_T NdotV = N.dot(V);
         
@@ -378,18 +387,36 @@ public:
         Vec3 baseColor = diffuseColorAtTextureCoords(textureCoords);
 
         auto diffuseBRDFContribution = [&]{
-            float_T FL = std::pow(1.0f - NdotL, 5.0f);
-            float_T FV = std::pow(1.0f - NdotV, 5.0f);
-            float_T Rr = 2.0f * roughness * square(LdotH);
+            float_T fresnelLight = schlickFresnelFactor(NdotL);
+            // for grazing angles
+            float_T fresnelView = schlickFresnelFactor(NdotV);
 
-            float_T Fd90 = 0.5f + 2.0f * roughness * square(LdotH);
-            float_T Fd = std::lerp(1.0f, Fd90, FL) * std::lerp(1.0f, Fd90, FV);
+            // Retro-reflection factor: increases reflection back toward viewer
+            // Stronger for rough surfaces and at grazing angles
+            float_T retroReflection = 2.0f * roughness * square(LdotH);
 
-            float_T Fss90 = Rr;
-            float_T Fss = std::lerp(1.0f, Fss90, FL) * std::lerp(1.0f, Fss90, FV);
-            float_T ss = 1.25f * (Fss * (1.0f / (NdotL + NdotV) - 0.5f) + 0.5f);
+            // Multi-scatter diffuse fresnel
+            // At grazing angles (Fd90), diffuse reflection increases with roughness
+            float_T diffuseGrazingReflectance = 0.5f + 2.0f * roughness * square(LdotH);
+            float_T diffuseFresnel = std::lerp(1.0f, diffuseGrazingReflectance, fresnelLight) * std::lerp(1.0f, diffuseGrazingReflectance, fresnelView);
 
-            return (1.0f / PI) * std::lerp(Fd, ss, subsurface) * baseColor * baseColorDiffuseIntensity * (1.0f - metallic);
+            // Subsurface scattering approximation
+            float_T subsurfaceGrazingReflectance = retroReflection;
+            float_T subsurfaceFresnel = std::lerp(1.0f, subsurfaceGrazingReflectance, fresnelLight) * std::lerp(1.0f, subsurfaceGrazingReflectance, fresnelView);
+
+            // Energy-conserving subsurface term that approximates multiple scattering
+            // The 1.25 factor tries to approximate energy conservation
+            float_T subsurfaceScatter = 1.25f * (subsurfaceFresnel * (1.0f / (NdotL + NdotV) - 0.5f) + 0.5f);
+
+            // combine everything:
+            // - 1/PI normalizes the diffuse BRDF
+            // - lerp between standard diffuse and subsurface based on subsurface parameter
+            // - multiply by base color and intensity
+            // - reduce diffuse contribution for metallic surfaces
+            return (1.0f / PI) *
+                std::lerp(diffuseFresnel, subsurfaceScatter, subsurface) *
+                baseColor * baseColorDiffuseIntensity *
+                (1.0f - metallic);
         }();
 
         auto specularBRDFContribution = [&] {
@@ -415,7 +442,7 @@ public:
             Vec3 F = addWeightedSchlickFresnel(specularColor, LdotH);
 
             // Distribution term (GGX/Trowbridge-Reitz)
-            float_T D = D_GGX_aniso(H, N, X, Y, ax, ay);
+            float_T D = D_GGX_anisotropic(H, N, X, Y, ax, ay);
 
             // Geometric term
             float_T G = smithG_GGX_aniso(NdotV, V.dot(X), V.dot(Y),

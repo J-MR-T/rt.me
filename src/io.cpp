@@ -173,16 +173,24 @@ std::unique_ptr<Renderer> jsonFileToRenderer(std::string_view path){
         return j[key];
     };
 
-    auto jsonToVec2 = [](const auto& j){
+    auto jsonToVec2 = [&fail](const auto& j){
+        if(!j.is_array())
+            fail("not an array: " + j.dump());
+        if(j.size() != 2)
+            fail("not a 2d vector: " + j.dump());
         return Vec2(j[0], j[1]);
     };
 
-    auto jsonToVec3 = [](const auto& j){
+    auto jsonToVec3 = [&fail](const auto& j){
+        if(!j.is_array())
+            fail("not an array: " + j.dump());
+        if(j.size() != 3)
+            fail("not a 3d vector: " + j.dump());
         return Vec3(j[0], j[1], j[2]);
     };
 
     if(!root.is_object())
-        fail("not an object");
+        fail("root not an object");
 
     // === start actually parsing ===
 
@@ -210,10 +218,10 @@ std::unique_ptr<Renderer> jsonFileToRenderer(std::string_view path){
 
     // parse tone map mode
     ToneMapMode toneMapMode = [&]{
-        if(!sceneJ.contains("tonemapmode"))
+        if(!root.contains("tonemapmode"))
             return Defaults::toneMapMode;
 
-        auto toneMapModeS = sceneJ["tonemapmode"];
+        auto toneMapModeS = root["tonemapmode"];
         if(toneMapModeS == "localLinear")
             return ToneMapMode::LOCAL_LINEAR;
         else if(toneMapModeS == "globalLinear")

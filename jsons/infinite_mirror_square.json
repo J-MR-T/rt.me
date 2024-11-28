@@ -1,14 +1,13 @@
 {
-    "nbounces":8, 
+    "nbounces":1024, 
     "rendermode":"phong",
-    "phongfresnel":true,
     "camera":
         { 
             "type":"pinhole", 
-            "width":1200, 
+            "width":800, 
             "height":800,
-            "position":[0.0, 1, -2],
-            "lookAt":[0.0, -0.1, 1.0],
+            "position":[-0.50, 0.5, -1.5],
+            "lookAt":[0, -0.05, 1.0],
             "upVector":[0.0, 1.0, 0.0],
             "fov":45.0,
             "exposure":0.1
@@ -20,8 +19,7 @@
                 { 
                     "type":"pointlight", 
                     "position":[0, 1.0, 0.5], 
-                    "intensity":[0.75, 0.75, 0.75] ,
-                    "falloff": 0.0
+                    "intensity":[0.75, 0.75, 0.75] 
                 }
             ], 
             "shapes":[ 
@@ -31,90 +29,37 @@
                     "radius":0.3, 
                     "material":
                         { 
-                            "ks":0.5, 
+                            "ks":0.1, 
                             "kd":0.9, 
                             "specularexponent":20, 
                             "diffusecolor":[0.8, 0.5, 0.5],
                             "specularcolor":[1.0,1.0,1.0],
-                            "isreflective":true,
+                            "isreflective":false,
                             "reflectivity":1.0,
-                            "isrefractive":true,
-                            "refractiveindex":1.12 
+                            "isrefractive":false,
+                            "refractiveindex":1.0 
                         } 
                 },
                 { 
                     "type":"sphere", 
-                    "center": [0, 0.1, 0.5],
-                    "radius":0.15, 
+                    "center": [0, 0.2, -1.25],
+                    "radius":0.2, 
                     "material":
                         { 
-                            "ks":0.5, 
+                            "ks":0.1, 
                             "kd":0.9, 
                             "specularexponent":20, 
-                            "diffusecolor":[1.0, 1.0, 1.0],
-                            "specularcolor":[1.0,1.0,1.0],
-                            "isreflective":true,
-                            "reflectivity":1.0,
-                            "isrefractive":true,
-                            "refractiveindex":1.01
-                        } 
-                },
-                { 
-                    "type":"sphere", 
-                    "center": [-0.85, -0.15, 0.15],
-                    "radius":0.25, 
-                    "material":
-                        { 
-                            "ks":0.5, 
-                            "kd":0.9, 
-                            "specularexponent":20, 
-                            "diffusecolor":[0.9, 0.9, 0.9],
-                            "specularcolor":[1.0,1.0,1.0],
-                            "isreflective":true,
-                            "reflectivity":0.8,
-                            "isrefractive":true,
-                            "refractiveindex":1.50
-                        } 
-                },
-                { 
-                    "type":"sphere", 
-                    "center": [-0.85, -0.15, 0.15],
-                    "radius":0.1, 
-                    "material":
-                        { 
-                            "ks":0.5, 
-                            "kd":0.9, 
-                            "specularexponent":20, 
-                            "diffusecolor":[0.9, 0.9, 0.9],
-                            "specularcolor":[1.0,1.0,1.0],
-                            "isreflective":true,
-                            "reflectivity":0.15,
-                            "isrefractive":true,
-                            "refractiveindex":1.00
-                        } 
-                },
-                {
-                    "type": "cylinder",
-                    "center": [0.3, 0.0001, 1],
-                    "axis": [0, 1, 0],
-                    "radius": 0.25,
-                    "height": 0.5,
-                    "material":
-                        { 
-                            "ks":0.5, 
-                            "kd":0.9, 
-                            "specularexponent":5, 
-                            "diffusecolor":[0.5, 0.5, 0.8],
+                            "diffusecolor":[0.8, 0.5, 0.8],
                             "specularcolor":[1.0,1.0,1.0],
                             "isreflective":false,
                             "reflectivity":1.0,
-                            "isrefractive":true,
+                            "isrefractive":false,
                             "refractiveindex":1.0 
                         } 
                 },
                 {
                     "type": "cylinder",
-                    "center": [0.85, 0.0001, 0.15],
+                    "center": [0.3, 0, 1],
                     "axis": [0, 1, 0],
                     "radius": 0.25,
                     "height": 0.5,
@@ -123,12 +68,12 @@
                             "ks":0.1, 
                             "kd":0.9, 
                             "specularexponent":20, 
-                            "diffusecolor":[0.8, 0.8, 0.8],
+                            "diffusecolor":[0.5, 0.5, 0.8],
                             "specularcolor":[1.0,1.0,1.0],
-                            "isreflective":true,
-                            "reflectivity":0.5,
-                            "isrefractive":true,
-                            "refractiveindex":3.0 
+                            "isreflective":false,
+                            "reflectivity":1.0,
+                            "isrefractive":false,
+                            "refractiveindex":1.0 
                         } 
                 },
                 { 
@@ -146,11 +91,7 @@
                             "isreflective":false,
                             "reflectivity":1.0,
                             "isrefractive":false,
-                            "refractiveindex":1.0 ,
-                            "texture": "textures/greyCheckerboard.ppm",
-                            "txv0": [1, 0],
-                            "txv1": [1, 1],
-                            "txv2": [0, 1]
+                            "refractiveindex":1.0 
                         } 
                 },
                 { 
@@ -168,11 +109,79 @@
                             "isreflective":false,
                             "reflectivity":1.0,
                             "isrefractive":false,
-                            "refractiveindex":1.0 ,
-                            "texture": "textures/greyCheckerboard.ppm",
-                            "txv0": [0, 0],
-                            "txv1": [1, 0],
-                            "txv2": [0, 1]
+                            "refractiveindex":1.0 
+                        } 
+                },
+                { 
+                    "type":"triangle", 
+                    "v0": [ -1, -0.5, -2],
+                    "v1": [ 1, 2.5, -2],
+                    "v2": [ 1, -0.5, -2],
+                    "material":
+                        { 
+                            "ks":0.1, 
+                            "kd":0.9, 
+                            "specularexponent":20, 
+                            "diffusecolor":[0.5, 0.8, 0.5],
+                            "specularcolor":[1.0,1.0,1.0],
+                            "isreflective":true,
+                            "reflectivity":1.0,
+                            "isrefractive":false,
+                            "refractiveindex":1.0 
+                        } 
+                },
+                { 
+                    "type":"triangle", 
+                    "v0": [ -1, -0.5, -2],
+                    "v1": [ -1, 2.5, -2],
+                    "v2": [ 1, 2.5, -2],
+                    "material":
+                        { 
+                            "ks":0.1, 
+                            "kd":0.9, 
+                            "specularexponent":20, 
+                            "diffusecolor":[0.5, 0.8, 0.5],
+                            "specularcolor":[1.0,1.0,1.0],
+                            "isreflective":true,
+                            "reflectivity":1.0,
+                            "isrefractive":false,
+                            "refractiveindex":1.0 
+                        } 
+                },
+                { 
+                    "type":"triangle", 
+                    "v0": [ -1, -0.5, 2],
+                    "v1": [ 1, 2.5, 2],
+                    "v2": [ 1, -0.5, 2],
+                    "material":
+                        { 
+                            "ks":0.1, 
+                            "kd":0.9, 
+                            "specularexponent":20, 
+                            "diffusecolor":[0.5, 0.8, 0.5],
+                            "specularcolor":[1.0,1.0,1.0],
+                            "isreflective":true,
+                            "reflectivity":1.0,
+                            "isrefractive":false,
+                            "refractiveindex":1.0 
+                        } 
+                },
+                { 
+                    "type":"triangle", 
+                    "v0": [ -1, -0.5, 2],
+                    "v1": [ -1, 2.5, 2],
+                    "v2": [ 1, 2.5, 2],
+                    "material":
+                        { 
+                            "ks":0.1, 
+                            "kd":0.9, 
+                            "specularexponent":20, 
+                            "diffusecolor":[0.5, 0.8, 0.5],
+                            "specularcolor":[1.0,1.0,1.0],
+                            "isreflective":true,
+                            "reflectivity":1.0,
+                            "isrefractive":false,
+                            "refractiveindex":1.0 
                         } 
                 }  
             ] 

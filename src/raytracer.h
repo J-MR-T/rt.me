@@ -311,7 +311,7 @@ private:
                 float_T specularWeight = std::pow(std::max(intersectionToShade.surfaceNormal.dot(H), (float_T) 0.), 
                         specularExponentShinyness);
 
-                float_T lightDistance = (light.position - intersectionToShade.point).length();
+                float_T lightDistance = light.position.distance(intersectionToShade.point);
                 specularSum += specularColor * specularWeight * light.intensityAtDistance(lightDistance) * ks;
             }
             return specularSum;
@@ -401,7 +401,7 @@ private:
             Vec3 N = intersectionToShade.surfaceNormal;
             float_T diffuseWeight = std::max(N.dot(L), (float_T) 0.);
 
-            float_T lightDistance = (light.position - intersectionToShade.point).length();
+            float_T lightDistance = light.position.distance(intersectionToShade.point);
 
             color += diffuseColor * diffuseWeight * light.intensityAtDistance(lightDistance) * kd;
         }
@@ -513,22 +513,20 @@ private:
         Vec3 V = (-intersection.incomingRay->direction).normalized();
 
         // create tangent space basis vectors (necessary for BRDF)
-        auto [X, Y] = Vec3::createOrthonormalBasis(N);
-
-        // TODO reintroduce comments from previous version
+        auto [tangent, bitangent] = Vec3::createOrthonormalBasis(N);
 
         unsigned actualSamplesTaken = 0;
 
-        // Sample contribution for each hemisphere sample
+        // accumulate contribution for each hemisphere sample
         Vec3 accumulatedContributions(0.);
         for(unsigned hemisphereSampleNum = 0; 
                 hemisphereSampleNum < scene.pathtracingSamples.hemisphereSamplesPerBounce; 
                 hemisphereSampleNum++) {
 
-            // Get multiple-importance-sample from BRDF
-            auto sample = material.sampleBRDF(V, N, X, Y);
+            // get multiple-importance-sample from BRDF
+            auto sample = material.sampleBRDF(V, N, tangent, bitangent);
 
-            // Skip invalid samples
+            // skip invalid samples
             if (sample.pdf <= epsilon) {
                 continue;
             }
@@ -549,7 +547,7 @@ private:
                 intersection.textureCoords,
                 V,
                 sample.direction,
-                X, Y, N
+                N, tangent, bitangent
             );
 
             float_T cosTheta = std::max((float_T)0., N.dot(sample.direction));
@@ -559,16 +557,16 @@ private:
         }
 
         if(actualSamplesTaken > 0)
-            // Average the samples
+            // average the samples
             overallColor += accumulatedContributions / actualSamplesTaken;
 
         if(!scene.pointLights.empty()){
             // sample point lights explicitly, because they are infinitessimally small, they can never be hit by a random ray (and are thus also not part of the BVH)
             // luckily, the pdf of the dirac delta distribution representing these cancels out with the light intensity of the point light itself, so we can simply add it, if the light is not in shadow
 
-            // optionally sample each light source multiple times
+            // optionally sample point light sources multiple times
             // not strictly necessary because of monte carlo - we're sampling each pixel multiple times anyway
-            // but this gives greater control, although it should be 1 in most cases
+            // but this gives greater control over the convergence, although it should be 1 in most cases
             Vec3 accumulatedContributions(0.);
 
             for(unsigned lightSampleNum = 0; lightSampleNum < scene.pathtracingSamples.pointLightSamplesPerBounce; lightSampleNum++){
@@ -579,18 +577,18 @@ private:
 
                 // permute the origin randomly if the light has some amount of softness
                 Vec3 intersectionOriginPlusJitter = intersection.point + Vec3(randomFloat() - 0.5, randomFloat() - 0.5, randomFloat() - 0.5) * light.shadowSoftness;
-                // the jitter here is equal in all directions which is not ideal, but good enough. Could improve this by jittering around the tangent (X) and bitangent (Y)
+                // the jitter here is equal in all directions which is not ideal, but good enough. Could improve this by jittering around the tangent and bitangent
 
                 Vec3 L = (light.position - intersectionOriginPlusJitter).normalized();
 
                 if(isInShadow(intersection, light, L))
                     continue;
 
-                Vec3 brdf = material.evaluateBRDF(intersection.textureCoords, V, L, X, Y, N);
+                Vec3 brdf = material.evaluateBRDF(intersection.textureCoords, V, L, N, tangent, bitangent);
 
                 float_T cosTheta = std::max(intersection.surfaceNormal.dot(L), (float_T) 0.);
 
-                float_T lightDistance = (light.position - intersection.point).length();
+                float_T lightDistance = light.position.distance(intersection.point);
 
                 // rendering equation
                 accumulatedContributions += brdf * cosTheta * light.intensityAtDistance(lightDistance);

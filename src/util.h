@@ -121,9 +121,9 @@ struct Vec3{
 
     bool operator==(const Vec3& other) const{
         // epsilon comparison
-        return std::abs(x - other.x) < epsilon &&
-            std::abs(y - other.y) < epsilon &&
-            std::abs(z - other.z) < epsilon;
+        return std::abs(x - other.x) < 2 * epsilon &&
+            std::abs(y - other.y) < 2 * epsilon &&
+            std::abs(z - other.z) < 2 * epsilon;
     }
 
     float_T operator[](size_t index) const{
@@ -208,6 +208,7 @@ struct Vec3{
     }
 
     Vec3 reflect(const Vec3& normal) const{
+        assert(normal == normal.normalized() && "normal must be a normal vector");
         const Vec3 incomingDirection = *this;
         return incomingDirection - normal * 2 * (incomingDirection.dot(normal));
     }
