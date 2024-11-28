@@ -979,8 +979,10 @@ public:
     }
 };
 
-/// for phong rendering, the mateiral is always a PhongMaterial, for pathtracing, it is always a BRDFMaterial
+/// for phong rendering, the material is always a PhongMaterial, for pathtracing, it is always a BRDFMaterial
 struct Material {
+    // In principle, we could introduce a generic `BRDFMaterial` (with `sampleBRDF` and `evaluateBRDF` functions), which could be different kinds of BRDFs.
+    // But as the Disney BRDF is so versatile, there is no real need for more BRDF materials right now, so this distinction would just complicate things.
     std::variant<PhongMaterial, PrincipledBRDFMaterial> variant;
 
     const PhongMaterial& assumePhongMaterial() const {
