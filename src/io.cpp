@@ -2,6 +2,12 @@
 #include "util.h"
 #include "raytracer.h"
 
+#ifdef NDEBUG
+// for maximum performance in release mode, disable exceptions
+#define JSON_NOEXCEPTION
+#define JSON_THROW_USER(ignored) do { std::println(stderr, "Not a valid json file (build in debug mode for exact error)"); std::exit(EXIT_FAILURE); } while(0)
+#endif
+
 #include "thirdparty/json.h"
 
 // NOTE: For non-library code, I mostly implement things in header files, because it's way easier to see the entire implementation when you don't have to constantly switch between header and implementation files. And it still allows sectioning off parts of code that are relatively independent

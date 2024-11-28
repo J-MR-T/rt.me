@@ -1,10 +1,6 @@
 #include <print>
 #include <chrono>
 
-// TODO disable exceptions and make json not throw
-//#define JSON_NOEXCEPTION
-//#define JSON_THROW_USER(ignored) do while(0){ std::println(stderr, "Not a valid json file"); std::exit(EXIT_FAILURE); };
-
 #include "raytracer.h"
 #include "io.h"
 
