@@ -12,3 +12,8 @@ compile_commands.json
 .idea
 
 Session.vim
+
+# project specific
+*.blend*
+rendersOfNote
+textures
