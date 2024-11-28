@@ -1,6 +1,7 @@
 {
     "rendermode": "pathtrace",
     "outfile" : "withVNorms.ppm",
+    "nbounces" : 1,
     "camera": {
         "type": "pinhole",
         "width": 1920,
