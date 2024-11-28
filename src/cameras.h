@@ -18,7 +18,6 @@ struct Camera{
 
     virtual ~Camera() = default; 
 
-    // TODO maybe experiment with && and std::move to avoid some copies
     Camera(Vec3 position,
            Vec3 lookAt,
            Vec3 up,

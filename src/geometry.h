@@ -371,24 +371,6 @@ struct BoundingBox{
                point.z >= min.z && point.z <= max.z;
     }
 
-    /*
-       TODO probably either remove or merge this with the intersects function
-    float_T intersection_distance(const Ray& ray) const {
-        Vec3 invDir = Vec3(1.) / ray.direction;
-
-        Vec3 t0 = (min - ray.origin) * invDir;
-        Vec3 t1 = (max - ray.origin) * invDir;
-
-        Vec3 tmin = t0.min(t1);
-        Vec3 tmax = t0.max(t1);
-
-        float_T tenter = std::max(std::max(tmin.x, tmin.y), tmin.z);
-        float_T texit = std::min(std::min(tmax.x, tmax.y), tmax.z);
-
-        return tenter <= texit && texit >= 0 ? tenter : std::numeric_limits<float_T>::max();
-    }
-    */
-
     bool intersects(const Ray& ray) const {
         Vec3 invDir = Vec3(1.) / ray.direction;
         
@@ -463,7 +445,7 @@ struct BVHNode{
     // this limits the memory usage of the BVH to 2^16*sizeof(BVHNode) ~= 3.3 MB
     // in practice, it may very well be advisable to increase this, as the performance improvements of having almsot every object in its own leaf node are substantial
     static constexpr size_t MAX_DEPTH = 16;
-    // TODO maybe remove in future, or make an option; not in use currently, because even though it reduces memory usage, it doesn't improve performance
+    // NOTE: I experimented with a MIN_OBJECTS value for the leaf nodes, but it is not currently in use, because even though it reduces memory usage, it reduces performance improve performance
     //static constexpr size_t MIN_OBJECTS = 4;
 
 public:
@@ -522,9 +504,11 @@ public:
         }
 
         // here, we're just checking both boxes
-        // TODO but we could check the least number of nodes by:
+
+        // sidenote: but we could check the least number of nodes by:
         // a checking the closer box first
         // b only checking the other box if the boxes overlap, or if the closer box has no intersection
+        // (THIS IS NOT IMPLEMENTED HERE)
 
         auto leftIntersection = left->intersect(ray, objects);
         auto rightIntersection = right->intersect(ray, objects);

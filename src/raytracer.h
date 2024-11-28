@@ -356,7 +356,7 @@ private:
                 }
 
                 // tint the refraction by the diffuse color, to be able to make e.g. red glass
-                // TODO could add something like a density parameter to the material, to decide how much to tint (via lerp), but for now, thats just encoded in the diffuse color
+                // NOTE: could add something like a density parameter to the material, to decide how much to tint (via lerp), but for now, thats just encoded in the diffuse color
                 refractedColor = refractedColor * diffuseColor;
 
                 // make sure to still have specular highlights on transparent objects, basically like a coat on top of the refraction
@@ -497,68 +497,6 @@ private:
             }
         }
     }
-
-    /*
-     TODO not used right now - either throw away, or put into separate lambertian material
-    enum ImportanceSamplingTechnique{
-        UNIFORM,
-        COSINE_WEIGHTED_HEMISPHERE,
-    };
-
-    template<ImportanceSamplingTechnique technique>
-    Vec3 sampleHemisphere(const Vec3& normal){
-        if constexpr (technique == COSINE_WEIGHTED_HEMISPHERE){
-            // cosine weighted hemisphere sampling, to eliminate the dot product from the rendering equation
-            // basically the approximation of the integral already divides by cos(theta), so the multiplying by theta
-            // in the normal rendering equation gets cancelled out.
-            // To get the correct value of dividing by the PDF (cos(theta)/pi), we have to multiply by pi again
-
-            // Generate two random numbers for disk sampling
-            float_T r = sqrt(randomFloat());
-            float_T theta = 2.0 * PI * randomFloat();
-
-            // Convert uniform disk samples to hemisphere samples
-            float_T x = r * cos(theta);
-            float_T y = r * sin(theta);
-
-            // Project up to hemisphere
-            float_T z = sqrt(1.0 - x*x - y*y);
-
-            // Create a coordinate system from the normal
-            // TODO that z check is strange
-            Vec3 up = (std::abs(normal.z) < (1 - 100 * epsilon)) ? Vec3(0, 0, 1) : Vec3(1, 0, 0);
-            Vec3 tangent = up.cross(normal).normalized();
-            Vec3 bitangent = normal.cross(tangent);
-
-            // Transform the local hemisphere direction to world space
-            // TODO hmmm, this will always give positive results though, right?
-            return (tangent * x + bitangent * y + normal * z).normalized();
-        }else if constexpr (technique == UNIFORM){
-            float_T phi = 2.0 * PI * randomFloat();
-            float_T z = randomFloat();
-            float_T r = std::sqrt(1.0 - z*z);
-
-            // Create basis vectors
-            Vec3 up = normal;
-            Vec3 right(1, 0, 0);
-            if (std::abs(up.y) < std::abs(up.x)) {
-                right = Vec3(0, 1, 0);
-            }
-
-            Vec3 tangent = up.cross(right);
-            Vec3 bitangent = up.cross(tangent);
-
-            Vec3 sample = tangent * (r * std::cos(phi)) + 
-                bitangent * (r * std::sin(phi)) + 
-                up * z;
-            assert(sample == sample.normalized() && "Sample must be on the unit hemisphere");
-
-            return sample;
-        } else {
-            static_assert(false, "Invalid importance sampling technique");
-        }
-    }
-    */
 
     Vec3 shadePathtraced(const Intersection& intersection, uint32_t bounces = 1){
         if(bounces > scene.nBounces)

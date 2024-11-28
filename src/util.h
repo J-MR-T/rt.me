@@ -299,7 +299,7 @@ struct Material;
 struct Intersection{
     // ray that caused the intersection
     const Ray* incomingRay;
-    // TODO instead of storing the intersection point, could store the distance along the ray
+    // NOTE: instead of storing the intersection point, could store the distance along the ray
     Vec3 point;
     Vec3 surfaceNormal;
     const Material* material;

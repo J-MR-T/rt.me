@@ -435,15 +435,9 @@ public:
             // Use the same Fresnel equation as specular but with fixed F0
             float_T Fr = addWeightedSchlickFresnel(F0, LdotH);
 
-            // TODO decide
-
-            // Option 1: Keep GTR1 with better gloss mapping
+            // use GTR1 instead of GGX because that's what Disney does
             float_T alpha = std::lerp(0.1f, 0.001f, clearcoatGloss);
             float_T Dr = GTR1(NdotH, alpha);
-
-            // Option 2: Use GGX (like specular) with fixed roughness
-            //float_T roughness = std::lerp(fixedClearcoatRoughness, 0.1f, clearcoatGloss);
-            //float_T Dr = D_GGX_aniso(H, N, X, Y, roughness, roughness);
 
             // Use the same geometry term as specular but with fixed roughness
             float_T Gr = smithG(NdotL, fixedClearcoatRoughness) * smithG(NdotV, fixedClearcoatRoughness);
