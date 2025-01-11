@@ -314,6 +314,9 @@ std::unique_ptr<Renderer> jsonFileToRenderer(std::string_view path){
 
     // binary and pathtrace both dont need lights, so this is optional
     if(sceneJ.contains("lightsources")){
+        if(renderMode == RenderMode::BINARY)
+            fail("Binary mode doesn't support light sources");
+
         json lightsJ = sceneJ["lightsources"];
 
         if(!lightsJ.is_array())
@@ -426,7 +429,9 @@ std::unique_ptr<Renderer> jsonFileToRenderer(std::string_view path){
         std::string type = getOrFail(sceneObjectJ, "type");
         // get material if it exists, transform the json into a material
         auto material = [&] -> Material{
-            if(renderMode == RenderMode::PHONG){
+            if(renderMode == RenderMode::BINARY && sceneObjectJ.contains("material")){
+                fail("Binary mode doesn't support materials");
+            }else if(renderMode == RenderMode::PHONG){
                 PhongMaterial phongMaterial = getOrElse(sceneObjectJ, "material", std::optional<json>()).and_then(jsonToPhongMaterial).value_or(Defaults::defaultPhongMaterial);
                 return Material(phongMaterial);
             }else if(renderMode == RenderMode::PATHTRACE || renderMode == RenderMode::PATHTRACE_INCREMENTAL){

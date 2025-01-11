@@ -203,27 +203,25 @@ struct Renderer{
                 for(uint32_t x = 0; x < scene.camera->widthPixels; x++){
                     Ray cameraRay = scene.camera->generateRay(Vec2(x, y));
 
-                    if constexpr (mode == RenderMode::BINARY){
-                        if(traceRayToClosestSceneIntersection(cameraRay))
-                            // match the provided reference colors exactly
-                            bufferSpecificPixel(Vec2(x, y), Vec3(1., 0., 0.));
-                        else
-                            bufferSpecificPixel(Vec2(x, y), Vec3(0.));
-                    }else if constexpr (mode == RenderMode::PHONG){
-                        Vec3 pixelColor = scene.backgroundColor;
-                        if(auto closestIntersection = traceRayToClosestSceneIntersection(cameraRay))
+                    Vec3 pixelColor = scene.backgroundColor;
+                    if(auto closestIntersection = traceRayToClosestSceneIntersection(cameraRay)){
+                        if constexpr (mode == RenderMode::BINARY){
+                            bufferSpecificPixel(Vec2(x, y), Vec3(1.));
+                            continue;
+                        }else if constexpr (mode == RenderMode::PHONG){
                             pixelColor = shadeBlinnPhong(*closestIntersection);
-                        if(scene.toneMapMode == ToneMapMode::LOCAL_LINEAR)
-                            bufferSpecificPixel(Vec2(x, y), localLinearToneMapping(pixelColor));
-                        else if(scene.toneMapMode == ToneMapMode::GLOBAL_LINEAR)
-                            // buffer raw color, tone map afterwards
-                            bufferSpecificPixel(Vec2(x, y), pixelColor);
-                        else
-                            assert(false && "Invalid tone map mode");
-                    }else{
-                        static_assert(false, "Invalid render mode");
+                        }else{
+                            static_assert(false, "Invalid render mode");
+                        }
                     }
 
+                    if(scene.toneMapMode == ToneMapMode::LOCAL_LINEAR)
+                        bufferSpecificPixel(Vec2(x, y), localLinearToneMapping(pixelColor));
+                    else if(scene.toneMapMode == ToneMapMode::GLOBAL_LINEAR)
+                        // buffer raw color, tone map afterwards
+                        bufferSpecificPixel(Vec2(x, y), pixelColor);
+                    else
+                        assert(false && "Invalid tone map mode");
                 }
             }
 
