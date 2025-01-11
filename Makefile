@@ -11,7 +11,7 @@ SOURCES=$(wildcard src/*.cpp)
 DEPS=$(wildcard src/*.h)
 OBJECTS=$(SOURCES:src/%.cpp=build/%.o)
 
-.PHONY: release relWithDebInfo debug clean setup clang-tidy
+.PHONY: release relWithDebInfo debug clean pgo-generate pgo-utilize setup clang-tidy
 
 release: setup $(SOURCES)
 	[ -f build/isRelease ] || $(MAKE) clean && $(MAKE) setup
